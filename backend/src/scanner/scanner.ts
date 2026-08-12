@@ -68,11 +68,16 @@ const extractContext = async (
       const rect = element.getBoundingClientRect();
       return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 4 && rect.height > 4;
     };
-    const documentElements = Array.from(document.body?.querySelectorAll('*') ?? []);
+    const documentElements = [
+      document.documentElement,
+      ...(document.body ? [document.body] : []),
+      ...Array.from(document.body?.querySelectorAll('*') ?? []),
+    ];
     const elementIndexes = new Map(documentElements.map((element, index) => [element, index]));
     const snapshot = (element: Element) => {
       const html = element as HTMLElement;
       const style = getComputedStyle(element);
+      const pseudoStyles = ['::before', '::after'].map((pseudo) => getComputedStyle(element, pseudo));
       const rect = element.getBoundingClientRect();
       const parentIndex = element.parentElement ? elementIndexes.get(element.parentElement) : undefined;
       return {
@@ -97,6 +102,9 @@ const extractContext = async (
         fontWeight: Number.parseInt(style.fontWeight, 10) || 400,
         borderRadius: radius(style.borderRadius),
         backgroundImage: clean(style.backgroundImage),
+        backgroundSize: clean(style.backgroundSize),
+        pseudoBackgroundImage: clean(pseudoStyles.map((pseudo) => pseudo.backgroundImage).filter((value) => value !== 'none').join(', ')),
+        pseudoBackgroundSize: clean(pseudoStyles.map((pseudo) => pseudo.backgroundSize).filter((value) => value !== 'auto').join(', ')),
         backgroundColor: clean(style.backgroundColor),
         backdropFilter: clean(style.backdropFilter),
         opacity: number(style.opacity),

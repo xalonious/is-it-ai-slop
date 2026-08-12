@@ -9,6 +9,27 @@ const credentialTerms = (value: string): string[] =>
 
 export const editorialDetectors: Detector[] = [
   {
+    id: 'technical-grid-background',
+    category: 'template',
+    analyze(context) {
+      if (!context.isEntryPage) return [];
+      const matches = context.elements.filter((element) => {
+        const images = `${element.backgroundImage} ${element.pseudoBackgroundImage}`;
+        const sizes = `${element.backgroundSize} ${element.pseudoBackgroundSize}`;
+        const gradients = images.match(/(?:repeating-)?linear-gradient\(/g) ?? [];
+        return element.rect.width >= context.viewport.width * 0.9 &&
+          element.rect.height >= context.viewport.height * 0.8 &&
+          gradients.length >= 2 &&
+          /(?:\d{1,3}(?:\.\d+)?px\s+){1,3}\d{1,3}(?:\.\d+)?px/.test(sizes) &&
+          /transparent|rgba?\([^)]*,\s*0(?:\.0+)?\)/.test(images);
+      });
+      const match = matches[0];
+      return match
+        ? [createFinding(this.id, this.category, 'Graph-paper background grid', 'Two perpendicular CSS gradient layers form a full-page technical grid behind the portfolio.', 3, [`${match.rect.width}x${match.rect.height}px background surface`, match.pseudoBackgroundSize || match.backgroundSize])]
+        : [];
+    },
+  },
+  {
     id: 'credential-marquee',
     category: 'animation',
     analyze(context) {

@@ -21,6 +21,9 @@ export interface ElementSnapshot {
   fontWeight: number;
   borderRadius: number;
   backgroundImage: string;
+  backgroundSize: string;
+  pseudoBackgroundImage: string;
+  pseudoBackgroundSize: string;
   backgroundColor: string;
   backdropFilter: string;
   opacity: number;

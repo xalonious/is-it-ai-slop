@@ -67,6 +67,11 @@ const comboFindings = (findings: Finding[]): Finding[] => {
   if (editorialMatches.length >= 4 && ids.has('credential-marquee') && ids.has('dot-ring-cursor')) {
     combos.push(createFinding('combo-editorial-portfolio', 'template', 'Editorial portfolio starter pack', 'An oversized statement hero, indexed micro-navigation, looping credentials, custom cursor, and reveal motion converge on a familiar generator-era portfolio composition.', 8, editorialMatches));
   }
+  const gridBackdropCompanions = ['fade-up-monoculture', 'glassmorphism', 'hero-pill', 'lucide-saturation', 'pill-infestation', 'tech-stack-soup'];
+  const gridBackdropMatches = gridBackdropCompanions.filter((id) => ids.has(id));
+  if (ids.has('technical-grid-background') && gridBackdropMatches.length >= 3) {
+    combos.push(createFinding('combo-technical-canvas', 'template', 'Technical-canvas template convergence', 'A graph-paper backdrop appears alongside several familiar component-library and motion defaults.', 6, ['technical-grid-background', ...gridBackdropMatches]));
+  }
   const cyberIds = ['faux-terminal', 'developer-profile-object', 'cyber-neon-hero', 'decorative-particle-field', 'paired-hero-ctas', 'fade-up-monoculture'];
   const cyberMatches = cyberIds.filter((id) => ids.has(id));
   const hasCodeInterface = ids.has('faux-terminal') || ids.has('developer-profile-object');
