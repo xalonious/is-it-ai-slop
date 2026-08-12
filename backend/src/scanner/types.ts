@@ -14,6 +14,8 @@ export interface ElementSnapshot {
   href?: string;
   src?: string;
   classes: string[];
+  parentIndex?: number;
+  childTags: string[];
   rect: RectSnapshot;
   fontSize: number;
   fontWeight: number;
@@ -53,6 +55,7 @@ export interface AnalysisContext {
   isEntryPage: boolean;
   title?: string;
   visibleText: string;
+  documentMarkers: string;
   viewport: { width: number; height: number };
   elements: ElementSnapshot[];
   headings: ElementSnapshot[];

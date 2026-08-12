@@ -1,12 +1,21 @@
 import type { Detector, ElementSnapshot } from '../types';
 import { createFinding, isPill, normalizedText } from './helpers';
 
-const likelyCard = (element: ElementSnapshot): boolean =>
-  ['article', 'li', 'div'].includes(element.tag) &&
-  element.rect.width >= 220 && element.rect.width <= 700 &&
-  element.rect.height >= 180 && element.rect.height <= 700 &&
-  element.text.length >= 50 &&
-  element.borderRadius >= 10;
+const likelyCard = (element: ElementSnapshot, viewportWidth: number, viewportHeight: number): boolean =>
+  ['a', 'article', 'li', 'div'].includes(element.tag) &&
+  element.parentIndex !== undefined &&
+  element.childTags.length > 0 &&
+  element.rect.width >= Math.max(140, viewportWidth * 0.1) &&
+  element.rect.width <= viewportWidth * 0.8 &&
+  element.rect.height >= 72 &&
+  element.rect.height <= viewportHeight * 0.85 &&
+  element.text.length >= 24;
+
+const relativeDifference = (left: number, right: number): number =>
+  Math.abs(left - right) / Math.max(left, right, 1);
+
+const structureSignature = (element: ElementSnapshot): string =>
+  `${element.tag}>${element.childTags.join(',')}`;
 
 const coefficientOfVariation = (values: number[]): number => {
   if (!values.length) return 1;
@@ -16,24 +25,101 @@ const coefficientOfVariation = (values: number[]): number => {
   return Math.sqrt(variance) / mean;
 };
 
+const projectContext = (cards: ElementSnapshot[], headings: ElementSnapshot[]): boolean => {
+  const markers = cards
+    .flatMap((card) => [...card.classes, card.href ?? ''])
+    .join(' ');
+  if (/project|portfolio|selected.?work|repository|github/i.test(markers)) return true;
+  const firstY = Math.min(...cards.map((card) => card.rect.y));
+  return headings.some((heading) =>
+    /projects|selected work|my work|portfolio/i.test(normalizedText(heading.text)) &&
+    heading.rect.y <= firstY &&
+    firstY - heading.rect.y <= 600,
+  );
+};
+
+const repeatedCardGroups = (cards: ElementSnapshot[]): ElementSnapshot[][] => {
+  const siblingGroups = new Map<string, ElementSnapshot[]>();
+  for (const card of cards) {
+    const key = `${card.parentIndex}:${structureSignature(card)}`;
+    siblingGroups.set(key, [...(siblingGroups.get(key) ?? []), card]);
+  }
+
+  return [...siblingGroups.values()]
+    .filter((group) => group.length >= 3)
+    .map((group) => {
+      const clusters = group.map((candidate) =>
+        group.filter((card) =>
+          relativeDifference(card.rect.width, candidate.rect.width) <= 0.12 &&
+          relativeDifference(card.rect.height, candidate.rect.height) <= 0.18,
+        ),
+      );
+      return clusters.sort((left, right) => right.length - left.length)[0];
+    })
+    .filter((group) => group.length >= 3);
+};
+
+const positionClusters = (
+  cards: ElementSnapshot[],
+  position: (card: ElementSnapshot) => number,
+  tolerance: number,
+): ElementSnapshot[][] => {
+  const clusters: ElementSnapshot[][] = [];
+  for (const card of [...cards].sort((left, right) => position(left) - position(right))) {
+    const cluster = clusters.find((candidate) => {
+      const center = candidate.reduce((sum, item) => sum + position(item), 0) / candidate.length;
+      return Math.abs(position(card) - center) <= tolerance;
+    });
+    if (cluster) cluster.push(card);
+    else clusters.push([card]);
+  }
+  return clusters;
+};
+
+const gridGeometry = (cards: ElementSnapshot[]) => {
+  const meanWidth = cards.reduce((sum, card) => sum + card.rect.width, 0) / cards.length;
+  const meanHeight = cards.reduce((sum, card) => sum + card.rect.height, 0) / cards.length;
+  const columns = positionClusters(cards, (card) => card.rect.x + card.rect.width / 2, meanWidth * 0.25);
+  const rows = positionClusters(cards, (card) => card.rect.y + card.rect.height / 2, meanHeight * 0.25);
+  const repeatedRows = rows.filter((row) => row.length >= 3);
+  const occupiedColumns = columns.filter((column) => column.length >= 2);
+  return {
+    columns: occupiedColumns.length,
+    rows: repeatedRows.length,
+    cards: repeatedRows.flat(),
+  };
+};
+
 export const projectDetectors: Detector[] = [
   {
-    id: 'project-card-sameness',
+    id: 'project-card-matrix',
     category: 'template',
     analyze(context) {
-      const cards = context.elements.filter(likelyCard);
+      const cards = context.elements.filter((element) =>
+        likelyCard(element, context.viewport.width, context.viewport.height),
+      );
       if (cards.length < 3) return [];
-      const similarGroups = cards.filter((candidate) => {
-        const peers = cards.filter((card) =>
-          Math.abs(card.rect.width - candidate.rect.width) <= 12 &&
-          Math.abs(card.rect.height - candidate.rect.height) <= 28,
-        );
-        return peers.length >= 3;
-      });
-      const unique = [...new Map(similarGroups.map((card) => [`${card.rect.x}:${card.rect.y}`, card])).values()].slice(0, 8);
-      if (unique.length < 3) return [];
-      const textVariation = coefficientOfVariation(unique.map((card) => card.text.length));
-      return [createFinding(this.id, this.category, 'Project-card cloning pattern', 'Several project-like panels share near-identical dimensions and content density.', 8, [`${unique.length} similarly sized project-like panels`, `Text-length variation ${Math.round(textVariation * 100)}%`])];
+      const groups = repeatedCardGroups(cards)
+        .filter((group) => projectContext(group, context.headings))
+        .map((group) => ({
+          geometry: gridGeometry(group),
+          densityVariation: coefficientOfVariation(
+            group.map((card) => card.text.length / Math.max(card.rect.width * card.rect.height, 1)),
+          ),
+        }))
+        .filter((group) =>
+          group.geometry.columns >= 3 &&
+          group.geometry.rows >= 2 &&
+          group.geometry.cards.length >= 6 &&
+          group.densityVariation <= 0.45,
+        )
+        .sort((left, right) => right.geometry.cards.length - left.geometry.cards.length || left.densityVariation - right.densityVariation);
+      const match = groups[0];
+      if (!match) return [];
+      const unique = [...new Map(match.geometry.cards.map((card) => [`${card.rect.x}:${card.rect.y}`, card])).values()].slice(0, 12);
+      const widthVariation = coefficientOfVariation(unique.map((card) => card.rect.width));
+      const heightVariation = coefficientOfVariation(unique.map((card) => card.rect.height));
+      return [createFinding(this.id, this.category, 'Six-up project card matrix', 'A project section uses the familiar multi-row matrix of uniform cards common to portfolio generators and templates.', 3, [`${match.geometry.columns} repeated columns across ${match.geometry.rows} rows`, `${unique.length} structurally matching project cards`, `Size variation ${Math.round(Math.max(widthVariation, heightVariation) * 100)}%`, `Content-density variation ${Math.round(match.densityVariation * 100)}%`])];
     },
   },
   {

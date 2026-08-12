@@ -14,7 +14,7 @@ Duplicate findings are merged across pages so a repeated pattern does not receiv
 
 - Rendered-page analysis through Playwright rather than raw HTML matching
 - Bounded same-origin crawling with project, work, and about page prioritization
-- Detection of repeated portfolio patterns such as bento grids, glassmorphism, excessive pills, rounded surfaces, generic copy, familiar hero layouts, and fade-up animation monocultures
+- Detection of repeated portfolio patterns such as bento grids, glassmorphism, excessive pills, rounded surfaces, faux terminals, cyber-neon heroes, generic copy, familiar hero layouts, and fade-up animation monocultures
 - Evidence-backed findings with the page on which each signal appeared
 - Category scores for layout, copy, stack, motion, and template energy
 - Combination, breadth, and density bonuses for clusters of otherwise ordinary signals

@@ -57,6 +57,17 @@ const comboFindings = (findings: Finding[]): Finding[] => {
   if (ids.has('copy-cliches') && ids.has('generic-section-sequence') && ids.has('navbar-cliche')) {
     combos.push(createFinding('combo-portfolio-template', 'copy', 'Portfolio template energy spike', 'Copy, navigation, and section ordering all follow the same familiar portfolio script.', 8, ['copy clichés', 'canonical navigation', 'canonical section order']));
   }
+  const projectMatrixCompanions = ['bento-grid', 'copy-cliches', 'excessive-project-badges', 'fade-up-monoculture', 'gradient-heading', 'paired-hero-ctas'];
+  const projectMatrixMatches = projectMatrixCompanions.filter((id) => ids.has(id));
+  if (ids.has('project-card-matrix') && projectMatrixMatches.length >= 2) {
+    combos.push(createFinding('combo-project-matrix', 'template', 'Portfolio-card template convergence', 'A uniform project matrix appears alongside multiple familiar generator-era presentation patterns.', 4, ['project-card-matrix', ...projectMatrixMatches]));
+  }
+  const cyberIds = ['faux-terminal', 'developer-profile-object', 'cyber-neon-hero', 'decorative-particle-field', 'paired-hero-ctas', 'fade-up-monoculture'];
+  const cyberMatches = cyberIds.filter((id) => ids.has(id));
+  const hasCodeInterface = ids.has('faux-terminal') || ids.has('developer-profile-object');
+  if (cyberMatches.length >= 4 && hasCodeInterface && ids.has('cyber-neon-hero')) {
+    combos.push(createFinding('combo-developer-command-center', 'template', 'Developer command-center convergence', 'Terminal cosplay, neon presentation, decorative atmosphere, and familiar hero behavior combine into a recognizable cyber-portfolio template.', 10, cyberMatches));
+  }
   return combos;
 };
 

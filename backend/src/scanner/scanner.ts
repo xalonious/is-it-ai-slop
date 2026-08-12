@@ -68,10 +68,13 @@ const extractContext = async (
       const rect = element.getBoundingClientRect();
       return style.visibility !== 'hidden' && style.display !== 'none' && rect.width > 4 && rect.height > 4;
     };
+    const documentElements = Array.from(document.body?.querySelectorAll('*') ?? []);
+    const elementIndexes = new Map(documentElements.map((element, index) => [element, index]));
     const snapshot = (element: Element) => {
       const html = element as HTMLElement;
       const style = getComputedStyle(element);
       const rect = element.getBoundingClientRect();
+      const parentIndex = element.parentElement ? elementIndexes.get(element.parentElement) : undefined;
       return {
         tag: element.tagName.toLowerCase(),
         text: clean(html.innerText || element.textContent),
@@ -82,6 +85,8 @@ const extractContext = async (
             ? element.src
             : undefined,
         classes: Array.from(element.classList).slice(0, 24),
+        parentIndex,
+        childTags: Array.from(element.children).slice(0, 16).map((child) => child.tagName.toLowerCase()),
         rect: {
           x: Math.round(rect.x),
           y: Math.round(rect.y),
@@ -103,7 +108,7 @@ const extractContext = async (
       };
     };
 
-    const allVisible = Array.from(document.body?.querySelectorAll('*') ?? [])
+    const allVisible = documentElements
       .filter(visible)
       .slice(0, 650);
     const select = (selector: string, limit: number) =>
@@ -128,10 +133,12 @@ const extractContext = async (
       };
     });
 
-    const bodyMarkers = [
+    const documentMarkers = [
       document.documentElement.className,
       document.body?.className ?? '',
-      ...allVisible.flatMap((element) => Array.from(element.classList).slice(0, 8)),
+      ...documentElements
+        .slice(0, 1_000)
+        .map((element) => `${element.id} ${Array.from(element.classList).slice(0, 8).join(' ')}`),
       ...Array.from(document.querySelectorAll('[data-radix-collection-item], [data-framer-name], [data-slot]'))
         .slice(0, 20)
         .map((element) => element.outerHTML.slice(0, 160)),
@@ -152,11 +159,11 @@ const extractContext = async (
       animations,
       scripts,
       stylesheets,
-      markers: { bodyMarkers, resources, generator },
+      markers: { documentMarkers, resources, generator },
     };
   });
 
-  const markers = `${extracted.markers.bodyMarkers} ${extracted.markers.resources} ${extracted.markers.generator}`;
+  const markers = `${extracted.markers.documentMarkers} ${extracted.markers.resources} ${extracted.markers.generator}`;
   const technologies: FrameworkFingerprints = {
     react: /react|__next|vite/.test(markers) || (await page.locator('#root, #__next').count()) > 0,
     next: /__next|_next\/static|next\.js/.test(markers),
@@ -175,6 +182,7 @@ const extractContext = async (
     isEntryPage,
     title: extracted.title,
     visibleText: extracted.visibleText,
+    documentMarkers: extracted.markers.documentMarkers,
     viewport: VIEWPORT,
     elements: extracted.elements,
     headings: extracted.headings,

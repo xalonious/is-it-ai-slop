@@ -1,7 +1,7 @@
 import type { Detector } from '../types';
 import { createFinding, inHero, isPill, mainHeading, near, normalizedText, uniqueTexts } from './helpers';
 
-const CTA_PATTERN = /view projects|see (my )?work|contact me|get in touch|let'?s talk|download (my )?(cv|resume)|hire me|explore projects/i;
+const CTA_PATTERN = /view projects|see (my )?work|^contact$|contact me|get in touch|let'?s talk|download (my )?(cv|resume)|hire me|explore projects/i;
 const SOCIAL_PATTERN = /github|linkedin|twitter|x\.com|dribbble|behance/i;
 
 export const heroDetectors: Detector[] = [
@@ -32,7 +32,11 @@ export const heroDetectors: Detector[] = [
       if (!context.isEntryPage) return [];
       const heading = mainHeading(context);
       if (!heading) return [];
-      const ctas = context.buttons.filter((button) => inHero(button) && near(button, heading, 420) && CTA_PATTERN.test(button.text));
+      const controls = [
+        ...context.links,
+        ...context.buttons.filter((button) => button.tag === 'button'),
+      ];
+      const ctas = controls.filter((button) => inHero(button) && near(button, heading, 520) && CTA_PATTERN.test(button.text));
       return ctas.length >= 2
         ? [createFinding(this.id, this.category, 'The ceremonial two-button hero', 'Two familiar portfolio calls-to-action occupy the hero area.', 4, uniqueTexts(ctas, 4))]
         : [];
