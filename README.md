@@ -54,8 +54,8 @@ Before installing the project, make sure you have:
 Clone the repository:
 
 ```bash
-git clone https://github.com/xalonious/isitslop.git
-cd isitslop
+git clone https://github.com/xalonious/is-it-ai-slop.git
+cd is-it-ai-slop
 ```
 
 ### 1. Configure the backend
@@ -192,7 +192,7 @@ It returns the normalized URL, overall score, severity, category scores, evidenc
 ## Project structure
 
 ```text
-isitslop/
+is-it-ai-slop/
 |-- backend/
 |   `-- src/
 |       |-- core/          # Middleware, logging, validation, and errors
@@ -221,4 +221,3 @@ Run these commands from the indicated directory.
 | `frontend/` | `npm run dev` | Start the Vite development server |
 | `frontend/` | `npm run build` | Type-check and create a production frontend build |
 | `frontend/` | `npm run preview` | Preview the production frontend build |
-
