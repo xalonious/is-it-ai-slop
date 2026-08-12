@@ -62,6 +62,11 @@ const comboFindings = (findings: Finding[]): Finding[] => {
   if (ids.has('project-card-matrix') && projectMatrixMatches.length >= 2) {
     combos.push(createFinding('combo-project-matrix', 'template', 'Portfolio-card template convergence', 'A uniform project matrix appears alongside multiple familiar generator-era presentation patterns.', 4, ['project-card-matrix', ...projectMatrixMatches]));
   }
+  const editorialIds = ['credential-marquee', 'dot-ring-cursor', 'editorial-statement-hero', 'numbered-micro-nav', 'fade-up-monoculture'];
+  const editorialMatches = editorialIds.filter((id) => ids.has(id));
+  if (editorialMatches.length >= 4 && ids.has('credential-marquee') && ids.has('dot-ring-cursor')) {
+    combos.push(createFinding('combo-editorial-portfolio', 'template', 'Editorial portfolio starter pack', 'An oversized statement hero, indexed micro-navigation, looping credentials, custom cursor, and reveal motion converge on a familiar generator-era portfolio composition.', 8, editorialMatches));
+  }
   const cyberIds = ['faux-terminal', 'developer-profile-object', 'cyber-neon-hero', 'decorative-particle-field', 'paired-hero-ctas', 'fade-up-monoculture'];
   const cyberMatches = cyberIds.filter((id) => ids.has(id));
   const hasCodeInterface = ids.has('faux-terminal') || ids.has('developer-profile-object');
