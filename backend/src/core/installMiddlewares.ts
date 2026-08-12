@@ -8,6 +8,7 @@ dotenv.config();
 
 export default function installMiddlewares(app: Express) {
   app.use(helmet());
+  app.set('trust proxy', 1);
 
   if(process.env.NODE_ENV === 'development') {
     app.use(loggingMiddleware)
