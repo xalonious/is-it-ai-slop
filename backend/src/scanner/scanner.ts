@@ -82,7 +82,7 @@ const extractContext = async (
       const parentIndex = element.parentElement ? elementIndexes.get(element.parentElement) : undefined;
       return {
         tag: element.tagName.toLowerCase(),
-        text: clean(html.innerText || element.textContent),
+        text: clean(html.innerText || element.textContent, 1_500),
         ariaLabel: clean(element.getAttribute('aria-label')) || undefined,
         href: element instanceof HTMLAnchorElement ? element.href : undefined,
         src:
@@ -100,6 +100,8 @@ const extractContext = async (
         },
         fontSize: number(style.fontSize),
         fontWeight: Number.parseInt(style.fontWeight, 10) || 400,
+        fontFamily: clean(style.fontFamily, 300),
+        whiteSpace: style.whiteSpace,
         borderRadius: radius(style.borderRadius),
         backgroundImage: clean(style.backgroundImage, 1_000),
         backgroundSize: clean(style.backgroundSize),
@@ -112,6 +114,7 @@ const extractContext = async (
         filter: clean(style.filter, 500),
         position: style.position,
         pointerEvents: style.pointerEvents,
+        contentEditable: html.isContentEditable,
         opacity: number(style.opacity),
         display: style.display,
         gridColumns: clean(style.gridTemplateColumns),

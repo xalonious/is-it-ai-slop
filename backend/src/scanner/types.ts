@@ -19,6 +19,8 @@ export interface ElementSnapshot {
   rect: RectSnapshot;
   fontSize: number;
   fontWeight: number;
+  fontFamily: string;
+  whiteSpace: string;
   borderRadius: number;
   backgroundImage: string;
   backgroundSize: string;
@@ -31,6 +33,7 @@ export interface ElementSnapshot {
   filter: string;
   position: string;
   pointerEvents: string;
+  contentEditable: boolean;
   opacity: number;
   display: string;
   gridColumns: string;

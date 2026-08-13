@@ -1,7 +1,75 @@
-import type { Detector } from '../types';
+import type { Detector, ElementSnapshot } from '../types';
 import { createFinding, mainHeading } from './helpers';
 
 const elementMarkers = (classes: string[]): string => classes.join(' ').toLowerCase();
+
+const TERMINAL_MARKER = /(?:^|[\s_-])(?:cli|cmd|command.?line|console|shell|term(?:inal)?|xterm)(?:$|[\s_-])/i;
+const MONOSPACE_FONT = /(?:cascadia|code|consolas|courier|fira|hack|ibm plex mono|inconsolata|menlo|monaco|mono|source code|terminal)/i;
+const SYSTEM_INFO_FIELDS = /\b(?:os|host|kernel|uptime|packages|shell|resolution|de|wm|terminal|cpu|gpu|memory|disk)\s*:/gi;
+const SHELL_COMMAND = /(?:^|\s)(?:\$|#|>)\s*(?:cat|cd|clear|echo|exit|help|ls|man|neofetch|npm|pwd|ssh|sudo|whoami)\b|\b(?:run|type|use)\s+(?:the\s+)?(?:help|ls|clear|cd)\s+command\b/i;
+const SHELL_PROMPT = /(?:^|\s)[([]?[\w.-]{1,32}@[\w.-]{1,64}[)\]]?(?:\s*[-:]?\s*(?:\[[~/.\w-]{0,80}\]|[~/.][\w/.-]{0,80}))?\s*(?:[$#>%]|[-─━]╯)|(?:^|\s)[~/.\w-]{0,80}\s*[$#>]\s*(?:$|\w)/im;
+const ASCII_GLYPH = /[▀-▟─-╿╭╮╯╰]/g;
+
+interface TerminalCandidate {
+  element: ElementSnapshot;
+  score: number;
+  signals: string[];
+  systemFields: string[];
+}
+
+const parseRgb = (value: string): [number, number, number] | undefined => {
+  const match = value.match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i);
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : undefined;
+};
+
+const isDarkSurface = (element: ElementSnapshot): boolean => {
+  const rgb = parseRgb(element.backgroundColor);
+  if (!rgb) return false;
+  const [red, green, blue] = rgb.map((channel) => channel / 255);
+  return 0.2126 * red + 0.7152 * green + 0.0722 * blue <= 0.18;
+};
+
+const terminalCandidate = (
+  element: ElementSnapshot,
+  viewport: { width: number; height: number },
+): TerminalCandidate | undefined => {
+  if (element.rect.width < 320 || element.rect.height < 120 || element.text.length < 24) return undefined;
+  const markerText = `${element.tag} ${element.classes.join(' ')} ${element.ariaLabel ?? ''}`;
+  const namedTerminal = TERMINAL_MARKER.test(markerText);
+  const terminalStructure = /^(?:code|pre|samp|kbd)$/.test(element.tag) ||
+    /^(?:pre|pre-wrap|break-spaces)$/.test(element.whiteSpace);
+  const monospace = MONOSPACE_FONT.test(element.fontFamily) || terminalStructure;
+  const prompt = SHELL_PROMPT.test(element.text);
+  const systemFields = [...new Set(element.text.match(SYSTEM_INFO_FIELDS)?.map((field) => field.slice(0, -1).toLowerCase()) ?? [])];
+  const command = SHELL_COMMAND.test(element.text);
+  const asciiGlyphs = element.text.match(ASCII_GLYPH)?.length ?? 0;
+  const asciiArt = asciiGlyphs >= 10 || /(?:[_\\/|]{4,}\s*){2,}/.test(element.text);
+  const dominant = element.rect.y < viewport.height * 0.35 &&
+    element.rect.width >= viewport.width * 0.65 &&
+    element.rect.height >= viewport.height * 0.35;
+  const dark = isDarkSurface(element);
+  const interactive = element.contentEditable || /input|prompt|cursor/.test(markerText.toLowerCase());
+
+  let score = 0;
+  const signals: string[] = [];
+  if (namedTerminal) { score += 3; signals.push('terminal naming or component marker'); }
+  else if (terminalStructure) { score += 1; signals.push('preformatted terminal-like structure'); }
+  if (prompt) { score += 3; signals.push('shell prompt syntax'); }
+  if (systemFields.length >= 4) { score += 4; signals.push(`${systemFields.length} system-information fields`); }
+  else if (systemFields.length >= 2) { score += 2; signals.push(`${systemFields.length} system-information fields`); }
+  if (command) { score += 1; signals.push('shell command or command instruction'); }
+  if (asciiArt) { score += 2; signals.push('ASCII or box-drawing artwork'); }
+  if (monospace) { score += 1; signals.push('monospace typography'); }
+  if (dark) { score += 1; signals.push('dark terminal surface'); }
+  if (dominant) { score += 2; signals.push('viewport-dominating presentation'); }
+  if (interactive) { score += 1; signals.push('interactive prompt or cursor cue'); }
+
+  const hasTerminalSemantics = namedTerminal || prompt || systemFields.length >= 4;
+  const hasTerminalPresentation = namedTerminal || (monospace && dark) || dominant || interactive;
+  return hasTerminalSemantics && hasTerminalPresentation && score >= 7
+    ? { element, score, signals, systemFields }
+    : undefined;
+};
 
 const profileFields = [
   ['name', /(?:["']?name["']?\s*:|this\.name\s*=)/i],
@@ -18,15 +86,31 @@ export const cyberDetectors: Detector[] = [
     category: 'template',
     analyze(context) {
       if (!context.isEntryPage) return [];
-      const terminals = context.elements.filter((element) => {
-        const value = `${elementMarkers(element.classes)} ${element.text}`.toLowerCase();
-        return element.rect.width >= 320 && element.rect.height >= 120 &&
-          /terminal|command.?line|console/.test(value) &&
-          /root@|type help|unix command|shell|bash|~\$|terminal v\d/.test(value);
-      });
-      return terminals.length
-        ? [createFinding(this.id, this.category, 'Interactive terminal cosplay', 'A substantial faux command-line interface occupies the opening presentation.', 7, terminals.slice(0, 3).map((terminal) => `${terminal.rect.width}x${terminal.rect.height}px terminal: ${terminal.text.slice(0, 100)}`))]
-        : [];
+      const candidates = context.elements
+        .map((element) => terminalCandidate(element, context.viewport))
+        .filter((candidate): candidate is TerminalCandidate => Boolean(candidate))
+        .sort((left, right) =>
+          right.score - left.score ||
+          left.element.rect.width * left.element.rect.height - right.element.rect.width * right.element.rect.height,
+        );
+      const match = candidates[0];
+      if (!match) return [];
+      const dominant = match.signals.includes('viewport-dominating presentation');
+      return [createFinding(
+        this.id,
+        this.category,
+        dominant ? 'Portfolio booted directly into terminal mode' : 'Interactive terminal cosplay',
+        dominant
+          ? 'The opening portfolio presents itself as a full terminal session, complete with shell syntax and system-interface cues.'
+          : 'A substantial faux command-line interface occupies the opening presentation.',
+        dominant ? 9 : 7,
+        [
+          `${match.element.rect.width}x${match.element.rect.height}px terminal-like region`,
+          ...match.signals.slice(0, 6),
+          ...(match.systemFields.length ? [`System fields: ${match.systemFields.join(', ')}`] : []),
+          match.element.text.slice(0, 140),
+        ],
+      )];
     },
   },
   {

@@ -69,6 +69,10 @@ The MVP measures clusters rather than provenance-specific signatures:
 7. Publishing residue: exact framework-default titles, descriptions, or favicons
    score as strong template evidence. Missing metadata scores weakly and only in
    clusters; placeholder or cross-domain values score more strongly.
+8. Terminal presentation: shell prompts, system-information dumps, ASCII art,
+   monospace structure, dark surfaces, and terminal component markers are scored
+   as a cluster. A viewport-dominating terminal scores more than a contained
+   terminal card, while ordinary documentation code blocks stay below threshold.
 
 The signals are useful because computed styles, geometry, visible text, links,
 resources, and animation metadata can be normalized from a rendered page. No ML,
