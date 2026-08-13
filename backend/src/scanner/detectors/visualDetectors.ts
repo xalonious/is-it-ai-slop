@@ -1,5 +1,12 @@
 import type { Detector, ElementSnapshot } from '../types';
-import { createFinding, isPill } from './helpers';
+import {
+  createMeasuredFinding,
+  inverseRamp,
+  isPill,
+  probableSurface,
+  ramp,
+  weightedConfidence,
+} from './helpers';
 
 const sizeable = (element: ElementSnapshot) => element.rect.width >= 80 && element.rect.height >= 32;
 const translucent = (color: string) => /rgba\([^)]*,\s*0?\.[0-8]/i.test(color) || /color-mix/i.test(color);
@@ -155,16 +162,203 @@ const hasNeonShadow = (element: ElementSnapshot): boolean => {
   return boxGlow || textGlow;
 };
 
+const MONOSPACE_FONT = /(?:cascadia|code|consolas|courier|fira|hack|ibm plex mono|inconsolata|jetbrains|menlo|monaco|mono|source code|terminal)/i;
+
+const splitCssLayers = (value: string): string[] => {
+  const layers: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] === '(') depth += 1;
+    else if (value[index] === ')') depth = Math.max(0, depth - 1);
+    else if (value[index] === ',' && depth === 0) {
+      layers.push(value.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  layers.push(value.slice(start).trim());
+  return layers.filter(Boolean);
+};
+
+const hardBlackOffsetShadow = (value: string): boolean =>
+  splitCssLayers(value).some((layer) => {
+    const colors = colorSamples(layer);
+    const nearBlack = colors.some((color) =>
+      color.alpha >= 0.75 && color.lightness <= 0.12,
+    );
+    if (!nearBlack || /\binset\b/i.test(layer)) return false;
+
+    const withoutColors = layer.replace(
+      /#[\da-f]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)|oklch\([^)]*\)/gi,
+      '',
+    );
+    const lengths = (withoutColors.match(/-?[\d.]+px/gi) ?? []).map(Number.parseFloat);
+    if (lengths.length < 3) return false;
+    const [offsetX, offsetY, blur, spread = 0] = lengths;
+    return Math.abs(offsetX) >= 2 && Math.abs(offsetX) <= 12 &&
+      Math.abs(offsetY) >= 2 && Math.abs(offsetY) <= 12 &&
+      Math.abs(blur) <= 1 && Math.abs(spread) <= 1.5;
+  });
+
+const nearBlackBorder = (element: ElementSnapshot): boolean =>
+  element.borderTopWidth >= 2 &&
+  element.borderTopStyle === 'solid' &&
+  colorSamples(element.borderTopColor).some((color) =>
+    color.alpha >= 0.8 && color.lightness <= 0.15,
+  );
+
+const uppercaseText = (element: ElementSnapshot): boolean => {
+  const letters = element.text.match(/[a-z]/gi) ?? [];
+  return letters.length >= 2 &&
+    (element.textTransform === 'uppercase' || letters.every((letter) => letter === letter.toUpperCase()));
+};
+
+const uniqueMatches = (values: string[]): string[] => [...new Set(values.map((value) => value.toLowerCase()))];
+
 export const visualDetectors: Detector[] = [
+  {
+    id: 'hard-edge-brutalism',
+    category: 'layout',
+    analyze(context) {
+      const candidates = context.elements.filter(probableSurface);
+      const hardSurfaces = candidates.filter((element) =>
+        element.borderRadius <= 4 &&
+        nearBlackBorder(element) &&
+        hardBlackOffsetShadow(element.boxShadow),
+      );
+      const ratio = candidates.length ? hardSurfaces.length / candidates.length : 0;
+
+      const accentSurfaces = hardSurfaces.filter((element) =>
+        colorSamples(element.backgroundColor).some((color) =>
+          color.alpha >= 0.8 && color.saturation >= 0.65 && color.lightness >= 0.35 && color.lightness <= 0.72,
+        ),
+      );
+      return createMeasuredFinding(
+        this.id,
+        this.category,
+        'Hard-edge component production line',
+        'Thick black outlines, square corners, and zero-blur offset shadows repeat across the interface as a neo-brutalist component system.',
+        {
+          confidence: weightedConfidence([
+            { confidence: ramp(hardSurfaces.length, 3, 12), weight: 0.5 },
+            { confidence: ramp(ratio, 0.05, 0.28), weight: 0.35 },
+            { confidence: ramp(accentSurfaces.length, 0, 5), weight: 0.15 },
+          ]),
+          maximumPoints: 7,
+          minimumConfidence: 0.35,
+          evidence: [
+            `${hardSurfaces.length} probable surfaces combine a >=2px black border with a hard offset shadow`,
+            `${Math.round(ratio * 100)}% of probable surfaces use the treatment`,
+            `${accentSurfaces.length} of those surfaces also use a saturated flat accent`,
+          ],
+        },
+      );
+    },
+  },
+  {
+    id: 'monospace-command-ui',
+    category: 'template',
+    analyze(context) {
+      const commandLabels = context.elements.filter((element) =>
+        element.text.length >= 2 &&
+        element.text.length <= 90 &&
+        element.rect.height <= 110 &&
+        MONOSPACE_FONT.test(element.fontFamily) &&
+        uppercaseText(element),
+      );
+      const interactiveLabels = commandLabels.filter((element) =>
+        /^(?:a|button|nav)$/.test(element.tag) || Boolean(element.href),
+      );
+      const uppercaseHeadings = context.headings.filter((heading) =>
+        heading.fontWeight >= 700 && uppercaseText(heading),
+      );
+      return createMeasuredFinding(
+        this.id,
+        this.category,
+        'Command-line typography escaped the terminal',
+        'Uppercase monospace labels spread across navigation and controls while heavy all-caps headings turn the full page into a command interface.',
+        {
+          confidence: weightedConfidence([
+            { confidence: ramp(commandLabels.length, 4, 16), weight: 0.45 },
+            { confidence: ramp(interactiveLabels.length, 2, 8), weight: 0.3 },
+            { confidence: ramp(uppercaseHeadings.length, 1, 5), weight: 0.25 },
+          ]),
+          maximumPoints: 4,
+          minimumConfidence: 0.4,
+          evidence: [
+            `${commandLabels.length} compact uppercase monospace labels`,
+            `${interactiveLabels.length} appear in navigation or interactive controls`,
+            `${uppercaseHeadings.length} heavy uppercase headings`,
+          ],
+        },
+      );
+    },
+  },
+  {
+    id: 'portfolio-telemetry-cosplay',
+    category: 'template',
+    analyze(context) {
+      if (!context.isEntryPage) return [];
+      const candidates = context.elements
+        .map((element) => {
+          const loads = element.text.match(/\b\d+(?:\.\d+)?%\s*(?:load|cpu|memory)\b/gi) ?? [];
+          const latencies = element.text.match(/\b\d+(?:\.\d+)?\s*ms\b/gi) ?? [];
+          const vocabulary = uniqueMatches(
+            element.text.match(/\b(?:telemetry|node|system|terminal|core|gateway|engine|status)\b/gi) ?? [],
+          );
+          return { element, loads, latencies, vocabulary };
+        })
+        .filter(({ element }) =>
+          element.rect.y >= 0 &&
+          element.rect.y < context.viewport.height * 0.55 &&
+          element.rect.width >= context.viewport.width * 0.5 &&
+          element.rect.height >= 28 && element.rect.height <= 200 &&
+          element.text.length <= 700 &&
+          MONOSPACE_FONT.test(element.fontFamily) &&
+          nearBlackBorder(element),
+        )
+        .sort((left, right) =>
+          right.loads.length + right.latencies.length - left.loads.length - left.latencies.length,
+        );
+      const match = candidates[0];
+      return createMeasuredFinding(
+        this.id,
+        this.category,
+        'Decorative telemetry reporting for duty',
+        'A prominent portfolio strip presents ornamental load and latency readings as if the personal site were an operations dashboard.',
+        {
+          confidence: match ? weightedConfidence([
+            { confidence: ramp(match.loads.length + match.latencies.length, 2, 8), weight: 0.55 },
+            { confidence: ramp(match.vocabulary.length, 1, 5), weight: 0.3 },
+            { confidence: inverseRamp(match.element.rect.y / context.viewport.height, 0.15, 0.55), weight: 0.15 },
+          ]) : 0,
+          maximumPoints: 4,
+          minimumConfidence: 0.45,
+          evidence: match ? [
+            `${match.loads.length} percentage load readings and ${match.latencies.length} latency readings`,
+            `Interface vocabulary: ${match.vocabulary.join(', ')}`,
+            `${match.element.rect.width}x${match.element.rect.height}px bordered telemetry region`,
+          ] : [],
+        },
+      );
+    },
+  },
   {
     id: 'rounded-everything',
     category: 'template',
     analyze(context) {
-      const candidates = context.elements.filter(sizeable);
+      const candidates = context.elements.filter(probableSurface);
       const rounded = candidates.filter((element) => element.borderRadius >= 16);
       const ratio = candidates.length ? rounded.length / candidates.length : 0;
-      if (rounded.length < 12 || ratio < 0.28) return [];
-      return [createFinding(this.id, this.category, 'Rounded-everything syndrome', 'Large corner radii recur across an unusually high share of visible UI surfaces.', 8, [`${rounded.length} of ${candidates.length} sizeable elements use ≥16px radius`, `${Math.round(ratio * 100)}% rounded-surface ratio`])];
+      return createMeasuredFinding(this.id, this.category, 'Rounded-everything syndrome', 'Large corner radii recur across an unusually high share of visible UI surfaces.', {
+        confidence: weightedConfidence([
+          { confidence: ramp(rounded.length, 5, 18), weight: 0.45 },
+          { confidence: ramp(ratio, 0.08, 0.45), weight: 0.55 },
+        ]),
+        maximumPoints: 8,
+        minimumConfidence: 0.35,
+        evidence: [`${rounded.length} of ${candidates.length} probable UI surfaces use ≥16px radius`, `${Math.round(ratio * 100)}% rounded-surface ratio`],
+      });
     },
   },
   {
@@ -172,8 +366,12 @@ export const visualDetectors: Detector[] = [
     category: 'template',
     analyze(context) {
       const pills = context.elements.filter(isPill);
-      if (pills.length < 10) return [];
-      return [createFinding(this.id, this.category, 'Pill population exceeds carrying capacity', 'The page contains an unusually large colony of capsule-shaped elements.', 6, [`${pills.length} pill-shaped elements measured`])];
+      return createMeasuredFinding(this.id, this.category, 'Pill population exceeds carrying capacity', 'The page contains an unusually large colony of capsule-shaped elements.', {
+        confidence: ramp(pills.length, 5, 16),
+        maximumPoints: 6,
+        minimumConfidence: 0.3,
+        evidence: [`${pills.length} pill-shaped elements measured`],
+      });
     },
   },
   {
@@ -185,9 +383,12 @@ export const visualDetectors: Detector[] = [
         (/blur/i.test(element.backdropFilter) || element.classes.some((name) => /backdrop-blur/i.test(name))) &&
         (translucent(element.backgroundColor) || element.opacity < 0.96),
       );
-      return glass.length >= 3
-        ? [createFinding(this.id, this.category, 'Repeated frosted-glass surfaces', 'Multiple translucent, blurred, rounded panels create a glassmorphism stack.', 10, [`${glass.length} glass-like surfaces detected`])]
-        : [];
+      return createMeasuredFinding(this.id, this.category, 'Repeated frosted-glass surfaces', 'Multiple translucent, blurred, rounded panels create a glassmorphism stack.', {
+        confidence: ramp(glass.length, 1, 5),
+        maximumPoints: 10,
+        minimumConfidence: 0.35,
+        evidence: [`${glass.length} glass-like surfaces detected`],
+      });
     },
   },
   {
@@ -195,6 +396,7 @@ export const visualDetectors: Detector[] = [
     category: 'layout',
     analyze(context) {
       const grids = context.elements.filter((element) => element.display === 'grid' && element.rect.width > 650 && element.rect.height > 250);
+      let best: { confidence: number; children: ElementSnapshot[]; grid: ElementSnapshot; variation: number } | undefined;
       for (const grid of grids) {
         const children = context.elements.filter((element) =>
           element.rect.x >= grid.rect.x && element.rect.y >= grid.rect.y &&
@@ -203,11 +405,23 @@ export const visualDetectors: Detector[] = [
           element.borderRadius >= 12 && element !== grid,
         );
         const areas = children.map((child) => child.rect.width * child.rect.height).filter(Boolean);
-        if (children.length >= 4 && areas.length && Math.max(...areas) / Math.min(...areas) >= 1.7) {
-          return [createFinding(this.id, this.category, 'Bento geometry located', 'A prominent grid contains rounded tiles with deliberately uneven footprints.', 9, [`${children.length} rounded tiles inside a ${grid.rect.width}×${grid.rect.height}px grid`, 'Tile areas vary by at least 1.7×'])];
-        }
+        if (!areas.length) continue;
+        const variation = Math.max(...areas) / Math.max(1, Math.min(...areas));
+        const confidence = weightedConfidence([
+          { confidence: ramp(children.length, 3, 7), weight: 0.55 },
+          { confidence: ramp(variation, 1.2, 2.2), weight: 0.45 },
+        ]);
+        if (!best || confidence > best.confidence) best = { confidence, children, grid, variation };
       }
-      return [];
+      return createMeasuredFinding(this.id, this.category, 'Bento geometry located', 'A prominent grid contains rounded tiles with deliberately uneven footprints.', {
+        confidence: best?.confidence ?? 0,
+        maximumPoints: 9,
+        minimumConfidence: 0.45,
+        evidence: best ? [
+          `${best.children.length} rounded tiles inside a ${best.grid.rect.width}×${best.grid.rect.height}px grid`,
+          `Tile areas vary by ${best.variation.toFixed(1)}×`,
+        ] : [],
+      });
     },
   },
   {
@@ -229,14 +443,19 @@ export const visualDetectors: Detector[] = [
       });
       if (!washes.length) return [];
       const largest = washes.sort((a, b) => b.rect.width * b.rect.height - a.rect.width * a.rect.height)[0];
-      return [createFinding(
+      const coverage = openingArea(largest, context.viewport) / viewportArea;
+      return createMeasuredFinding(
         this.id,
         this.category,
         'The ceremonial indigo-to-violet wash',
         'A saturated blue-purple gradient occupies a substantial part of the opening viewport, a familiar generator-era color default.',
-        4,
-        [`Large gradient surface measured at ${largest.rect.width}×${largest.rect.height}px`],
-      )];
+        {
+          confidence: ramp(coverage, 0.18, 0.48),
+          maximumPoints: 4,
+          minimumConfidence: 0.3,
+          evidence: [`Large gradient surface measured at ${largest.rect.width}×${largest.rect.height}px`, `${Math.round(coverage * 100)}% opening-viewport coverage`],
+        },
+      );
     },
   },
   {
@@ -244,19 +463,24 @@ export const visualDetectors: Detector[] = [
     category: 'layout',
     analyze(context) {
       const gradients = context.elements.filter((element) => sizeable(element) && hasGradient(element));
-      if (gradients.length < 6) return [];
       const largeGradients = gradients.filter(
         (element) => element.rect.width * element.rect.height >= context.viewport.width * context.viewport.height * 0.08,
       );
-      if (largeGradients.length === 0 && gradients.length < 9) return [];
-      return [createFinding(
+      return createMeasuredFinding(
         this.id,
         this.category,
         'Gradient privileges have been revoked',
         'Gradient treatments recur across enough visible surfaces to become a design system rather than an accent.',
-        4,
-        [`${gradients.length} sizeable gradient-treated elements detected`, `${largeGradients.length} cover at least 8% of the viewport`],
-      )];
+        {
+          confidence: weightedConfidence([
+            { confidence: ramp(gradients.length, 3, 12), weight: 0.65 },
+            { confidence: ramp(largeGradients.length, 0, 4), weight: 0.35 },
+          ]),
+          maximumPoints: 4,
+          minimumConfidence: 0.35,
+          evidence: [`${gradients.length} sizeable gradient-treated elements detected`, `${largeGradients.length} cover at least 8% of the viewport`],
+        },
+      );
     },
   },
   {
@@ -271,7 +495,7 @@ export const visualDetectors: Detector[] = [
           const layers = value.match(/radial-gradient\(/gi)?.length ?? 0;
           const colors = colorSamples(value);
           const saturated = colors.some((color) =>
-            color.alpha >= 0.12 && color.saturation >= 0.42 && color.lightness >= 0.2,
+            color.alpha >= 0.06 && color.saturation >= 0.42 && color.lightness >= 0.2,
           );
           const fadesOut = /transparent/i.test(value) || colors.some((color) => color.alpha <= 0.08);
           return { element, layers, saturated, fadesOut };
@@ -297,15 +521,18 @@ export const visualDetectors: Detector[] = [
       );
       const radialLayers = radialSurfaces.reduce((total, surface) => total + surface.layers, 0);
       const bloomCount = radialLayers + blurredBlobs.length;
-      if (bloomCount < 2) return [];
-      return [createFinding(
+      return createMeasuredFinding(
         this.id,
         this.category,
         'Ambient glow industrial complex',
         'Multiple saturated radial or blurred color blooms sit behind the opening content without conveying state or interaction.',
-        3,
-        [`${radialLayers} decorative radial-gradient layers`, `${blurredBlobs.length} large blurred color blobs`],
-      )];
+        {
+          confidence: ramp(bloomCount, 1, 4),
+          maximumPoints: 3,
+          minimumConfidence: 0.3,
+          evidence: [`${radialLayers} decorative radial-gradient layers`, `${blurredBlobs.length} large blurred color blobs`],
+        },
+      );
     },
   },
   {
@@ -320,17 +547,20 @@ export const visualDetectors: Detector[] = [
         !hasStateMeaning(element) &&
         hasNeonShadow(element),
       );
-      if (glowing.length < 3) return [];
       const boxGlows = glowing.filter((element) => hasSaturatedColor(`${element.boxShadow} ${element.filter}`, 0.52));
       const textGlows = glowing.filter((element) => hasSaturatedColor(element.textShadow, 0.52));
-      return [createFinding(
+      return createMeasuredFinding(
         this.id,
         this.category,
         'Neon shadows seeking a purpose',
         'Saturated glow shadows recur on static content in dark mode without communicating interaction, status, or selection.',
-        4,
-        [`${boxGlows.length} non-interactive elements use colored box or drop shadows`, `${textGlows.length} headings use colored text shadows`],
-      )];
+        {
+          confidence: ramp(glowing.length, 1, 5),
+          maximumPoints: 4,
+          minimumConfidence: 0.35,
+          evidence: [`${boxGlows.length} non-interactive elements use colored box or drop shadows`, `${textGlows.length} headings use colored text shadows`],
+        },
+      );
     },
   },
 ];

@@ -77,3 +77,18 @@ The MVP measures clusters rather than provenance-specific signatures:
 The signals are useful because computed styles, geometry, visible text, links,
 resources, and animation metadata can be normalized from a rendered page. No ML,
 source-code ownership guess, or raw DOM transfer is required.
+
+## Confidence scoring
+
+Visual and structural signals use bounded confidence curves rather than relying on
+single-number cutoffs. Counts, proportions, geometry, and presentation features
+contribute independently to a detector's confidence, while hard gates are retained
+only for properties that define the pattern itself. For example, a compact badge
+must still appear near the opening heading, but its radius and aspect ratio are
+graded instead of requiring one exact capsule geometry.
+
+Candidate ratios use semantically relevant populations such as probable UI surfaces
+rather than every large DOM element. Combination, breadth, and density bonuses are
+also confidence-weighted so a one-element difference does not cause a large score
+jump. The curve endpoints remain heuristic calibration values and should be tuned
+against a mixed corpus of positive examples and visually distinct negative controls.

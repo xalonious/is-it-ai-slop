@@ -22,10 +22,15 @@ export interface ElementSnapshot {
   fontFamily: string;
   whiteSpace: string;
   borderRadius: number;
+  borderTopWidth: number;
+  borderTopStyle: string;
+  borderTopColor: string;
   backgroundImage: string;
   backgroundSize: string;
+  backgroundRepeat: string;
   pseudoBackgroundImage: string;
   pseudoBackgroundSize: string;
+  pseudoBackgroundRepeat: string;
   backgroundColor: string;
   backdropFilter: string;
   boxShadow: string;
@@ -37,6 +42,7 @@ export interface ElementSnapshot {
   opacity: number;
   display: string;
   gridColumns: string;
+  textTransform: string;
   animationName: string;
   transitionProperty: string;
   transform: string;
@@ -104,6 +110,13 @@ export interface Finding {
   title: string;
   description: string;
   points: number;
+  evidence: string[];
+}
+
+export interface SignalMeasurement {
+  confidence: number;
+  maximumPoints: number;
+  minimumConfidence?: number;
   evidence: string[];
 }
 

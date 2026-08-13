@@ -1,5 +1,5 @@
 import type { Detector, ElementSnapshot } from '../types';
-import { createFinding, isPill, normalizedText } from './helpers';
+import { createMeasuredFinding, inverseRamp, isPill, normalizedText, ramp, weightedConfidence } from './helpers';
 
 const likelyCard = (element: ElementSnapshot, viewportWidth: number, viewportHeight: number): boolean =>
   ['a', 'article', 'li', 'div'].includes(element.tag) &&
@@ -108,10 +108,10 @@ export const projectDetectors: Detector[] = [
           ),
         }))
         .filter((group) =>
-          group.geometry.columns >= 3 &&
-          group.geometry.rows >= 2 &&
-          group.geometry.cards.length >= 6 &&
-          group.densityVariation <= 0.45,
+          group.geometry.columns >= 2 &&
+          group.geometry.rows >= 1 &&
+          group.geometry.cards.length >= 3 &&
+          group.densityVariation <= 0.7,
         )
         .sort((left, right) => right.geometry.cards.length - left.geometry.cards.length || left.densityVariation - right.densityVariation);
       const match = groups[0];
@@ -119,7 +119,18 @@ export const projectDetectors: Detector[] = [
       const unique = [...new Map(match.geometry.cards.map((card) => [`${card.rect.x}:${card.rect.y}`, card])).values()].slice(0, 12);
       const widthVariation = coefficientOfVariation(unique.map((card) => card.rect.width));
       const heightVariation = coefficientOfVariation(unique.map((card) => card.rect.height));
-      return [createFinding(this.id, this.category, 'Six-up project card matrix', 'A project section uses the familiar multi-row matrix of uniform cards common to portfolio generators and templates.', 3, [`${match.geometry.columns} repeated columns across ${match.geometry.rows} rows`, `${unique.length} structurally matching project cards`, `Size variation ${Math.round(Math.max(widthVariation, heightVariation) * 100)}%`, `Content-density variation ${Math.round(match.densityVariation * 100)}%`])];
+      return createMeasuredFinding(this.id, this.category, 'Project card matrix', 'A project section uses a repeated matrix of uniform cards common to portfolio generators and templates.', {
+        confidence: weightedConfidence([
+          { confidence: ramp(unique.length, 3, 9), weight: 0.35 },
+          { confidence: ramp(match.geometry.columns, 2, 4), weight: 0.2 },
+          { confidence: ramp(match.geometry.rows, 1, 3), weight: 0.15 },
+          { confidence: inverseRamp(Math.max(widthVariation, heightVariation), 0.08, 0.35), weight: 0.15 },
+          { confidence: inverseRamp(match.densityVariation, 0.2, 0.7), weight: 0.15 },
+        ]),
+        maximumPoints: 3,
+        minimumConfidence: 0.4,
+        evidence: [`${match.geometry.columns} repeated columns across ${match.geometry.rows} rows`, `${unique.length} structurally matching project cards`, `Size variation ${Math.round(Math.max(widthVariation, heightVariation) * 100)}%`, `Content-density variation ${Math.round(match.densityVariation * 100)}%`],
+      });
     },
   },
   {
@@ -129,9 +140,12 @@ export const projectDetectors: Detector[] = [
       const projectsHeading = context.headings.find((heading) => /projects|selected work|my work/i.test(normalizedText(heading.text)));
       if (!projectsHeading) return [];
       const pills = context.elements.filter((element) => isPill(element) && element.rect.y > projectsHeading.rect.y && element.text.length <= 30);
-      return pills.length >= 12
-        ? [createFinding(this.id, this.category, 'Projects under badge quarantine', 'The projects region contains a dense layer of pill-shaped technology labels.', 4, [`${pills.length} compact pills after the projects heading`])]
-        : [];
+      return createMeasuredFinding(this.id, this.category, 'Projects under badge quarantine', 'The projects region contains a dense layer of pill-shaped technology labels.', {
+        confidence: ramp(pills.length, 6, 18),
+        maximumPoints: 4,
+        minimumConfidence: 0.3,
+        evidence: [`${pills.length} compact pills after the projects heading`],
+      });
     },
   },
 ];

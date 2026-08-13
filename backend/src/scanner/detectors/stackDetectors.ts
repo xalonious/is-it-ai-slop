@@ -1,5 +1,5 @@
 import type { Detector } from '../types';
-import { createFinding, normalizedText } from './helpers';
+import { createFinding, createMeasuredFinding, normalizedText, ramp } from './helpers';
 
 const TECHNOLOGIES = [
   'javascript', 'typescript', 'react', 'next.js', 'nextjs', 'vue', 'angular', 'svelte',
@@ -17,8 +17,12 @@ export const stackDetectors: Detector[] = [
       const text = normalizedText(context.visibleText);
       const matches = [...new Set(TECHNOLOGIES.filter((technology) => text.includes(normalizedText(technology))))];
       const projectHeadings = context.headings.filter((heading) => /project|work/i.test(heading.text)).length;
-      if (matches.length < 15) return [];
-      return [createFinding(this.id, this.category, 'Technology pantry inventory', 'The named-tool inventory is unusually long relative to the portfolio evidence around it.', 2, [`${matches.length} named technologies`, `${projectHeadings || 'No'} project/work section heading${projectHeadings === 1 ? '' : 's'}`, matches.slice(0, 12).join(', ')])];
+      return createMeasuredFinding(this.id, this.category, 'Technology pantry inventory', 'The named-tool inventory is unusually long relative to the portfolio evidence around it.', {
+        confidence: ramp(matches.length, 9, 20),
+        maximumPoints: 2,
+        minimumConfidence: 0.35,
+        evidence: [`${matches.length} named technologies`, `${projectHeadings || 'No'} project/work section heading${projectHeadings === 1 ? '' : 's'}`, matches.slice(0, 12).join(', ')],
+      });
     },
   },
   {
@@ -27,9 +31,12 @@ export const stackDetectors: Detector[] = [
     analyze(context) {
       if (!context.technologies.lucide) return [];
       const iconCount = context.images.filter((image) => image.tag === 'svg' && image.rect.width <= 40 && image.rect.height <= 40).length;
-      return iconCount >= 12
-        ? [createFinding(this.id, this.category, 'Lucide is doing overtime', 'A Lucide fingerprint appears alongside a large number of small SVG icons.', 1, [`${iconCount} small SVG icons`, 'Lucide/resource fingerprint present'])]
-        : [];
+      return createMeasuredFinding(this.id, this.category, 'Lucide is doing overtime', 'A Lucide fingerprint appears alongside a large number of small SVG icons.', {
+        confidence: ramp(iconCount, 6, 16),
+        maximumPoints: 1,
+        minimumConfidence: 0.35,
+        evidence: [`${iconCount} small SVG icons`, 'Lucide/resource fingerprint present'],
+      });
     },
   },
   {
@@ -52,9 +59,12 @@ export const stackDetectors: Detector[] = [
       });
       const cssAnimated = context.elements.filter((element) => /fade|slide|reveal|enter/i.test(`${element.animationName} ${element.classes.join(' ')}`));
       const count = fadeUps.length + cssAnimated.length;
-      return count >= 7
-        ? [createFinding(this.id, this.category, 'Fade-up monoculture', 'Many elements appear to enter with the same opacity-plus-vertical-translation recipe.', 8, [`${count} fade/slide/reveal animation signals`])]
-        : [];
+      return createMeasuredFinding(this.id, this.category, 'Fade-up monoculture', 'Many elements appear to enter with the same opacity-plus-vertical-translation recipe.', {
+        confidence: ramp(count, 3, 10),
+        maximumPoints: 8,
+        minimumConfidence: 0.3,
+        evidence: [`${count} fade/slide/reveal animation signals`],
+      });
     },
   },
 ];

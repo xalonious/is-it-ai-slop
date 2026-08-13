@@ -1,5 +1,5 @@
 import type { Detector, ElementSnapshot } from '../types';
-import { createFinding, mainHeading, normalizedText } from './helpers';
+import { createFinding, createMeasuredFinding, mainHeading, normalizedText, ramp, weightedConfidence } from './helpers';
 
 const elementMarkers = (element: ElementSnapshot): string =>
   `${element.classes.join(' ')} ${element.text}`.toLowerCase();
@@ -7,26 +7,79 @@ const elementMarkers = (element: ElementSnapshot): string =>
 const credentialTerms = (value: string): string[] =>
   [...new Set(value.match(/founder|director|head of|lead|designer|developer|engineer|client|partner/gi) ?? [])];
 
+const gradientDirections = (images: string): number[] =>
+  [...images.matchAll(/(?:repeating-)?linear-gradient\(\s*([^,]+)/gi)].map((match) => {
+    const prelude = match[1].trim().toLowerCase();
+    const degrees = prelude.match(/^(-?[\d.]+)deg\b/);
+    if (degrees) return ((Number(degrees[1]) % 180) + 180) % 180;
+    if (/^to\s+(?:left|right)\b/.test(prelude)) return 90;
+    return 0;
+  });
+
+const hasPerpendicularDirections = (directions: number[]): boolean =>
+  directions.some((direction, index) => directions.slice(index + 1).some((other) => {
+    const difference = Math.abs(direction - other);
+    return Math.abs(difference - 90) <= 5;
+  }));
+
+const embeddedSvgSources = (images: string): string[] =>
+  [...images.matchAll(/data:image\/svg\+xml([^,]*),([^"')]+)/gi)].map((match) => {
+    try {
+      return /;base64/i.test(match[1])
+        ? Buffer.from(match[2], 'base64').toString('utf8')
+        : decodeURIComponent(match[2]);
+    } catch {
+      return '';
+    }
+  });
+
+const hasSvgGridGeometry = (svg: string): boolean => {
+  if (!svg) return false;
+  const normalized = svg.toLowerCase();
+  const namedGrid = /\b(?:grid|graph|crosshatch|square-pattern)\b/.test(normalized);
+  const patternTile = /<pattern\b/.test(normalized);
+  const lineTags = normalized.match(/<line\b/g)?.length ?? 0;
+  const axisPath = /<path\b[^>]*\bd=["'][^"']*(?:\bh\s*-?[\d.]|\bv\s*-?[\d.])[^"']*["']/i.test(normalized);
+  const cornerPath = /<path\b[^>]*\bd=["'][^"']*\bm\s*-?[\d.]+(?:[ ,]+)-?[\d.]+[^"']*\bl\s*-?[\d.]+(?:[ ,]+)-?[\d.]+(?:[ ,]+)-?[\d.]+(?:[ ,]+)-?[\d.]+/i.test(normalized);
+  const lineGeometry = lineTags >= 2 || axisPath || cornerPath;
+  return lineGeometry && (namedGrid || patternTile);
+};
+
 export const editorialDetectors: Detector[] = [
   {
     id: 'technical-grid-background',
     category: 'template',
     analyze(context) {
       if (!context.isEntryPage) return [];
-      const matches = context.elements.filter((element) => {
+      const matches = context.elements.map((element) => {
         const images = `${element.backgroundImage} ${element.pseudoBackgroundImage}`;
         const sizes = `${element.backgroundSize} ${element.pseudoBackgroundSize}`;
-        const gradients = images.match(/(?:repeating-)?linear-gradient\(/g) ?? [];
-        return element.rect.width >= context.viewport.width * 0.9 &&
+        const directions = gradientDirections(images);
+        const largeSurface = element.rect.width >= context.viewport.width * 0.9 &&
           element.rect.height >= context.viewport.height * 0.8 &&
-          gradients.length >= 2 &&
+          element.rect.width * element.rect.height >= context.viewport.width * context.viewport.height * 0.75;
+        const cssGrid = directions.length >= 2 &&
+          hasPerpendicularDirections(directions) &&
           /(?:\d{1,3}(?:\.\d+)?px\s+){1,3}\d{1,3}(?:\.\d+)?px/.test(sizes) &&
           /transparent|rgba?\([^)]*,\s*0(?:\.0+)?\)/.test(images);
-      });
+        const svgGrid = embeddedSvgSources(images).some(hasSvgGridGeometry);
+        return {
+          element,
+          cssGrid,
+          svgGrid,
+          confidence: largeSurface ? Math.max(cssGrid ? 1 : 0, svgGrid ? 0.85 : 0) : 0,
+        };
+      }).sort((left, right) => right.confidence - left.confidence);
       const match = matches[0];
-      return match
-        ? [createFinding(this.id, this.category, 'Graph-paper background grid', 'Two perpendicular CSS gradient layers form a full-page technical grid behind the portfolio.', 3, [`${match.rect.width}x${match.rect.height}px background surface`, match.pseudoBackgroundSize || match.backgroundSize])]
-        : [];
+      return createMeasuredFinding(this.id, this.category, 'Graph-paper background grid', 'A full-page repeated grid texture creates a technical graph-paper canvas behind the portfolio.', {
+        confidence: match?.confidence ?? 0,
+        maximumPoints: 3,
+        minimumConfidence: 0.45,
+        evidence: match?.confidence ? [
+          `${match.element.rect.width}x${match.element.rect.height}px background surface`,
+          match.cssGrid ? 'Perpendicular CSS gradient grid' : 'Embedded SVG with explicit grid geometry',
+        ] : [],
+      });
     },
   },
   {
@@ -47,9 +100,15 @@ export const editorialDetectors: Detector[] = [
             /marquee|ticker|scroll|loop/.test(`${element.animationName} ${markers}`);
         });
       const match = tracks[0];
-      return match
-        ? [createFinding(this.id, this.category, 'Credential marquee loop', 'A full-width animated ticker continuously cycles professional roles or affiliations beneath the hero.', 3, [`${match.element.rect.width}px animated track`, `${match.element.childTags.length} repeated ticker items`, `${match.terms.length} role terms: ${match.terms.join(', ')}`])]
-        : [];
+      return createMeasuredFinding(this.id, this.category, 'Credential marquee loop', 'A full-width animated ticker continuously cycles professional roles or affiliations beneath the hero.', {
+        confidence: match ? weightedConfidence([
+          { confidence: ramp(match.element.childTags.length, 4, 10), weight: 0.55 },
+          { confidence: ramp(match.terms.length, 1, 4), weight: 0.45 },
+        ]) : 0,
+        maximumPoints: 3,
+        minimumConfidence: 0.4,
+        evidence: match ? [`${match.element.rect.width}px animated track`, `${match.element.childTags.length} repeated ticker items`, `${match.terms.length} role terms: ${match.terms.join(', ')}`] : [],
+      });
     },
   },
   {
@@ -83,8 +142,17 @@ export const editorialDetectors: Detector[] = [
       const heading = mainHeading(context);
       if (!heading) return [];
       const lineCount = heading.childTags.filter((tag) => tag === 'span').length;
-      if (heading.fontSize < 72 || heading.rect.height < 220 || heading.rect.width < context.viewport.width * 0.55 || lineCount < 2) return [];
-      return [createFinding(this.id, this.category, 'Oversized editorial hero statement', 'A short portfolio thesis is typeset as a viewport-dominating multi-line editorial headline.', 2, [`${heading.fontSize}px heading across ${lineCount} structured lines`, heading.text.slice(0, 120)])];
+      return createMeasuredFinding(this.id, this.category, 'Oversized editorial hero statement', 'A short portfolio thesis is typeset as a viewport-dominating multi-line editorial headline.', {
+        confidence: weightedConfidence([
+          { confidence: ramp(heading.fontSize, 54, 96), weight: 0.35 },
+          { confidence: ramp(heading.rect.height, 130, 320), weight: 0.25 },
+          { confidence: ramp(heading.rect.width / context.viewport.width, 0.4, 0.72), weight: 0.2 },
+          { confidence: ramp(lineCount, 1, 4), weight: 0.2 },
+        ]),
+        maximumPoints: 2,
+        minimumConfidence: 0.45,
+        evidence: [`${heading.fontSize}px heading across ${lineCount} structured lines`, heading.text.slice(0, 120)],
+      });
     },
   },
   {
@@ -97,9 +165,12 @@ export const editorialDetectors: Detector[] = [
         link.text.length <= 32 &&
         /^0?\d\s+[a-z]/i.test(normalizedText(link.text)),
       );
-      return numbered.length >= 4
-        ? [createFinding(this.id, this.category, 'Numbered micro-navigation', 'The primary navigation prefixes compact uppercase section labels with two-digit indices.', 2, numbered.slice(0, 8).map((link) => link.text))]
-        : [];
+      return createMeasuredFinding(this.id, this.category, 'Numbered micro-navigation', 'The primary navigation prefixes compact uppercase section labels with two-digit indices.', {
+        confidence: ramp(numbered.length, 2, 6),
+        maximumPoints: 2,
+        minimumConfidence: 0.35,
+        evidence: numbered.slice(0, 8).map((link) => link.text),
+      });
     },
   },
 ];

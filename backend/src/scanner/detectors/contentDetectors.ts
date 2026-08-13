@@ -1,5 +1,5 @@
 import type { Detector } from '../types';
-import { createFinding, normalizedText } from './helpers';
+import { createMeasuredFinding, normalizedText, ramp } from './helpers';
 
 export const CLICHE_PHRASES = [
   'passionate developer',
@@ -20,7 +20,20 @@ export const CLICHE_PHRASES = [
   'exceptional digital experiences',
 ] as const;
 
-const NAV_ITEMS = ['home', 'about', 'projects', 'skills', 'experience', 'contact'];
+const NAV_ITEMS = ['home', 'about', 'projects', 'skills', 'experience', 'contact'] as const;
+type NavItem = typeof NAV_ITEMS[number];
+
+const NAV_ALIASES: Record<NavItem, RegExp> = {
+  home: /^(?:home|start)$/i,
+  about: /^(?:about|profile|bio)(?: me)?$/i,
+  projects: /^(?:projects?|work|portfolio|selected work)$/i,
+  skills: /^(?:skills?|expertise|technical arsenal|proficiency|capabilities)$/i,
+  experience: /^(?:experience|journey|career|education|background|credentials|certifications?)$/i,
+  contact: /^(?:contact|get in touch|connect|hire me|let'?s talk)$/i,
+};
+
+const navMatches = (value: string, item: NavItem): boolean =>
+  NAV_ALIASES[item].test(normalizedText(value));
 
 export const contentDetectors: Detector[] = [
   {
@@ -29,8 +42,12 @@ export const contentDetectors: Detector[] = [
     analyze(context) {
       const text = normalizedText(context.visibleText);
       const matches = CLICHE_PHRASES.filter((phrase) => text.includes(normalizedText(phrase)));
-      if (!matches.length) return [];
-      return [createFinding(this.id, this.category, 'Portfolio copy from central casting', 'The prose contains familiar phrases shared by many generated and template portfolios.', Math.min(11, 3 + (matches.length - 1) * 2), matches.map((match) => `“${match}”`))];
+      return createMeasuredFinding(this.id, this.category, 'Portfolio copy from central casting', 'The prose contains familiar phrases shared by many generated and template portfolios.', {
+        confidence: ramp(matches.length, 0, 4),
+        maximumPoints: 11,
+        minimumConfidence: 0.2,
+        evidence: matches.map((match) => `“${match}”`),
+      });
     },
   },
   {
@@ -38,10 +55,13 @@ export const contentDetectors: Detector[] = [
     category: 'template',
     analyze(context) {
       const firstLinks = context.links.filter((link) => link.rect.y < 180).map((link) => normalizedText(link.text));
-      const matches = NAV_ITEMS.filter((item) => firstLinks.includes(item));
-      return matches.length >= 4
-        ? [createFinding(this.id, this.category, 'Canonical portfolio navigation', 'The opening navigation closely follows the standard portfolio checklist.', 2, matches)]
-        : [];
+      const matches = NAV_ITEMS.filter((item) => firstLinks.some((link) => navMatches(link, item)));
+      return createMeasuredFinding(this.id, this.category, 'Canonical portfolio navigation', 'The opening navigation closely follows the standard portfolio checklist.', {
+        confidence: ramp(matches.length, 2, 5),
+        maximumPoints: 2,
+        minimumConfidence: 0.3,
+        evidence: matches,
+      });
     },
   },
   {
@@ -49,19 +69,22 @@ export const contentDetectors: Detector[] = [
     category: 'template',
     analyze(context) {
       const labels = context.headings.map((heading) => normalizedText(heading.text));
-      const ordered = NAV_ITEMS.slice(1).filter((item) => labels.some((label) => label === item || label.startsWith(`${item} `)));
+      const ordered = NAV_ITEMS.slice(1).filter((item) => labels.some((label) => navMatches(label, item)));
       let ascending = 0;
       let lastIndex = -1;
       for (const item of ordered) {
-        const index = labels.findIndex((label) => label === item || label.startsWith(`${item} `));
+        const index = labels.findIndex((label) => navMatches(label, item));
         if (index > lastIndex) {
           ascending += 1;
           lastIndex = index;
         }
       }
-      return ascending >= 4
-        ? [createFinding(this.id, this.category, 'Portfolio section conveyor belt', 'The page proceeds through the familiar About → Skills → Projects → Experience → Contact sequence.', 2, ordered)]
-        : [];
+      return createMeasuredFinding(this.id, this.category, 'Portfolio section conveyor belt', 'The page proceeds through a familiar About, Skills, Projects, Experience, and Contact sequence.', {
+        confidence: ramp(ascending, 2, 5),
+        maximumPoints: 2,
+        minimumConfidence: 0.3,
+        evidence: ordered,
+      });
     },
   },
 ];

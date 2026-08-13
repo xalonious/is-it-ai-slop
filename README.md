@@ -158,7 +158,7 @@ The five report categories have independent display caps:
 | Motion | 12 |
 | Template | 40 |
 
-The overall score is based on detector points rather than an average of these category percentages. Strong clusters can add combination bonuses, while meaningful findings spread across several categories can add capped breadth and density bonuses.
+The overall score is based on detector points rather than an average of these category percentages. Most visual and structural detectors measure a confidence curve across several features instead of switching on at one exact count. Strong clusters can add confidence-weighted combination bonuses, while findings spread across several categories add smoothly capped breadth and density bonuses.
 
 | Score | Severity |
 | ---: | --- |
