@@ -395,30 +395,60 @@ export const visualDetectors: Detector[] = [
     id: 'bento-grid',
     category: 'layout',
     analyze(context) {
-      const grids = context.elements.filter((element) => element.display === 'grid' && element.rect.width > 650 && element.rect.height > 250);
-      let best: { confidence: number; children: ElementSnapshot[]; grid: ElementSnapshot; variation: number } | undefined;
+      const grids = context.elements.filter((element) =>
+        element.display === 'grid' &&
+        element.gridColumns !== 'none' &&
+        element.rect.width >= context.viewport.width * 0.45 &&
+        element.rect.width <= context.viewport.width * 1.1 &&
+        element.rect.height >= 250 &&
+        element.rect.height <= context.viewport.height * 2.5,
+      );
+      let best: {
+        confidence: number;
+        children: ElementSnapshot[];
+        grid: ElementSnapshot;
+        variation: number;
+        columns: number;
+        rows: number;
+        coverage: number;
+      } | undefined;
       for (const grid of grids) {
         const children = context.elements.filter((element) =>
-          element.rect.x >= grid.rect.x && element.rect.y >= grid.rect.y &&
-          element.rect.x + element.rect.width <= grid.rect.x + grid.rect.width + 2 &&
-          element.rect.y + element.rect.height <= grid.rect.y + grid.rect.height + 2 &&
-          element.borderRadius >= 12 && element !== grid,
+          element.parentIndex === grid.nodeIndex &&
+          element.borderRadius >= 12 &&
+          element.rect.width >= Math.max(140, grid.rect.width * 0.14) &&
+          element.rect.height >= 90 &&
+          element.rect.width * element.rect.height >= grid.rect.width * grid.rect.height * 0.035,
         );
+        if (children.length < 3 || children.length > 12) continue;
         const areas = children.map((child) => child.rect.width * child.rect.height).filter(Boolean);
-        if (!areas.length) continue;
         const variation = Math.max(...areas) / Math.max(1, Math.min(...areas));
+        if (variation < 1.15 || variation > 12) continue;
+        const uniqueCoordinates = (values: number[]) => values
+          .sort((left, right) => left - right)
+          .filter((value, index, sorted) => index === 0 || value - sorted[index - 1] > 12).length;
+        const columns = uniqueCoordinates(children.map((child) => child.rect.x));
+        const rows = uniqueCoordinates(children.map((child) => child.rect.y));
+        if (columns < 2 || rows < 2) continue;
+        const coverage = areas.reduce((total, area) => total + area, 0) /
+          Math.max(1, grid.rect.width * grid.rect.height);
+        if (coverage < 0.35 || coverage > 1.08) continue;
         const confidence = weightedConfidence([
-          { confidence: ramp(children.length, 3, 7), weight: 0.55 },
-          { confidence: ramp(variation, 1.2, 2.2), weight: 0.45 },
+          { confidence: ramp(children.length, 3, 7), weight: 0.4 },
+          { confidence: ramp(variation, 1.15, 2.5) * inverseRamp(variation, 8, 12), weight: 0.3 },
+          { confidence: ramp(coverage, 0.35, 0.72), weight: 0.3 },
         ]);
-        if (!best || confidence > best.confidence) best = { confidence, children, grid, variation };
+        if (!best || confidence > best.confidence) {
+          best = { confidence, children, grid, variation, columns, rows, coverage };
+        }
       }
       return createMeasuredFinding(this.id, this.category, 'Bento geometry located', 'A prominent grid contains rounded tiles with deliberately uneven footprints.', {
         confidence: best?.confidence ?? 0,
         maximumPoints: 9,
         minimumConfidence: 0.45,
         evidence: best ? [
-          `${best.children.length} rounded tiles inside a ${best.grid.rect.width}×${best.grid.rect.height}px grid`,
+          `${best.children.length} direct rounded tiles across ${best.columns} columns and ${best.rows} rows`,
+          `${best.grid.rect.width}×${best.grid.rect.height}px grid with ${Math.round(best.coverage * 100)}% tile coverage`,
           `Tile areas vary by ${best.variation.toFixed(1)}×`,
         ] : [],
       });

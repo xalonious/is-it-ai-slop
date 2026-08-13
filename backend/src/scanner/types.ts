@@ -8,9 +8,12 @@ export interface RectSnapshot {
 }
 
 export interface ElementSnapshot {
+  nodeIndex: number;
   tag: string;
   text: string;
   ariaLabel?: string;
+  role?: string;
+  ariaBusy: boolean;
   href?: string;
   src?: string;
   classes: string[];

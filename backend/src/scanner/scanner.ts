@@ -76,14 +76,18 @@ const extractContext = async (
     const elementIndexes = new Map(documentElements.map((element, index) => [element, index]));
     const snapshot = (element: Element) => {
       const html = element as HTMLElement;
+      const nodeIndex = elementIndexes.get(element) ?? -1;
       const style = getComputedStyle(element);
       const pseudoStyles = ['::before', '::after'].map((pseudo) => getComputedStyle(element, pseudo));
       const rect = element.getBoundingClientRect();
       const parentIndex = element.parentElement ? elementIndexes.get(element.parentElement) : undefined;
       return {
+        nodeIndex,
         tag: element.tagName.toLowerCase(),
         text: clean(html.innerText || element.textContent, 1_500),
         ariaLabel: clean(element.getAttribute('aria-label')) || undefined,
+        role: clean(element.getAttribute('role')) || undefined,
+        ariaBusy: element.getAttribute('aria-busy') === 'true',
         href: element instanceof HTMLAnchorElement ? element.href : undefined,
         src:
           element instanceof HTMLImageElement || element instanceof HTMLScriptElement

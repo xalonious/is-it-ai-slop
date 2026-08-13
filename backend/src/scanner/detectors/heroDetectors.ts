@@ -1,4 +1,4 @@
-import type { Detector } from '../types';
+import type { Detector, ElementSnapshot } from '../types';
 import {
   createMeasuredFinding,
   inHero,
@@ -13,6 +13,15 @@ import {
 
 const CTA_PATTERN = /view projects|see (my )?work|^contact$|contact me|get in touch|let'?s talk|download (my )?(cv|resume)|hire me|explore projects/i;
 const SOCIAL_PATTERN = /github|linkedin|twitter|x\.com|dribbble|behance/i;
+const TRANSIENT_STATUS = /^(?:loading|please wait|initializing|connecting|fetching|preparing|booting|starting)(?:[\s.!â€¦_-].*)?$/i;
+
+const isTransientStatus = (element: ElementSnapshot): boolean => {
+  const markers = `${element.classes.join(' ')} ${element.ariaLabel ?? ''}`;
+  return element.ariaBusy ||
+    /^(?:status|progressbar)$/.test(element.role ?? '') ||
+    TRANSIENT_STATUS.test(element.text.trim()) ||
+    /(?:^|[\s_-])(?:loader|loading|progress|skeleton|spinner)(?:$|[\s_-])/i.test(markers);
+};
 
 export const heroDetectors: Detector[] = [
   {
@@ -26,6 +35,7 @@ export const heroDetectors: Detector[] = [
         (element) =>
           element.text.length > 0 &&
           element.text.length < 70 &&
+          !isTransientStatus(element) &&
           element.rect.height >= 18 &&
           element.rect.height <= 64 &&
           element.rect.width >= element.rect.height * 1.35 &&
