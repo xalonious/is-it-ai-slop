@@ -48,7 +48,7 @@ const comboFindings = (findings: Finding[]): Finding[] => {
     combos.push(createFinding('combo-classic-hero', 'template', 'Classic vibe-coded hero constellation', 'Several individually ordinary hero choices align into a suspiciously familiar full composition.', 14, heroMatches));
   }
 
-  const visualIds = ['rounded-everything', 'pill-infestation', 'glassmorphism', 'bento-grid', 'lucide-saturation', 'fade-up-monoculture'];
+  const visualIds = ['rounded-everything', 'pill-infestation', 'glassmorphism', 'bento-grid', 'lucide-saturation', 'fade-up-monoculture', 'indigo-violet-wash', 'decorative-radial-blooms', 'neon-shadow-overload'];
   const visualMatches = visualIds.filter((id) => ids.has(id));
   if (visualMatches.length >= 4) {
     combos.push(createFinding('combo-component-defaults', 'template', 'Component-default convergence', 'Rounded surfaces, fashionable effects, icons, and motion recur as one recognizable design-system cluster.', 15, visualMatches));

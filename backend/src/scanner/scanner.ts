@@ -101,12 +101,17 @@ const extractContext = async (
         fontSize: number(style.fontSize),
         fontWeight: Number.parseInt(style.fontWeight, 10) || 400,
         borderRadius: radius(style.borderRadius),
-        backgroundImage: clean(style.backgroundImage),
+        backgroundImage: clean(style.backgroundImage, 1_000),
         backgroundSize: clean(style.backgroundSize),
-        pseudoBackgroundImage: clean(pseudoStyles.map((pseudo) => pseudo.backgroundImage).filter((value) => value !== 'none').join(', ')),
+        pseudoBackgroundImage: clean(pseudoStyles.map((pseudo) => pseudo.backgroundImage).filter((value) => value !== 'none').join(', '), 1_000),
         pseudoBackgroundSize: clean(pseudoStyles.map((pseudo) => pseudo.backgroundSize).filter((value) => value !== 'auto').join(', ')),
         backgroundColor: clean(style.backgroundColor),
         backdropFilter: clean(style.backdropFilter),
+        boxShadow: clean(style.boxShadow, 1_000),
+        textShadow: clean(style.textShadow, 1_000),
+        filter: clean(style.filter, 500),
+        position: style.position,
+        pointerEvents: style.pointerEvents,
         opacity: number(style.opacity),
         display: style.display,
         gridColumns: clean(style.gridTemplateColumns),
@@ -126,6 +131,27 @@ const extractContext = async (
       .map((link) => link.href)
       .filter(Boolean)
       .slice(0, 100);
+    const metadataEntries = (selector: string, attribute: 'name' | 'property') =>
+      Object.fromEntries(
+        Array.from(document.querySelectorAll<HTMLMetaElement>(selector))
+          .map((meta) => [clean(meta.getAttribute(attribute), 100).toLowerCase(), clean(meta.content, 2_000)] as const)
+          .filter(([key, content]) => key && content),
+      );
+    const description = clean(document.querySelector<HTMLMetaElement>('meta[name="description" i]')?.content, 2_000) || undefined;
+    const generator = clean(document.querySelector<HTMLMetaElement>('meta[name="generator" i]')?.content, 300) || undefined;
+    const canonicalUrl = document.querySelector<HTMLLinkElement>('link[rel="canonical" i]')?.href || undefined;
+    const faviconUrls = Array.from(document.querySelectorAll<HTMLLinkElement>('link[rel*="icon" i]'))
+      .map((link) => link.href)
+      .filter(Boolean)
+      .slice(0, 12);
+    const openGraph = {
+      ...metadataEntries('meta[name^="og:" i]', 'name'),
+      ...metadataEntries('meta[property^="og:" i]', 'property'),
+    };
+    const twitter = {
+      ...metadataEntries('meta[property^="twitter:" i]', 'property'),
+      ...metadataEntries('meta[name^="twitter:" i]', 'name'),
+    };
 
     const animations = document.getAnimations().slice(0, 100).map((animation) => {
       const effect = animation.effect as KeyframeEffect | null;
@@ -152,7 +178,7 @@ const extractContext = async (
         .map((element) => element.outerHTML.slice(0, 160)),
     ].join(' ').toLowerCase();
     const resources = [...scripts, ...stylesheets].join(' ').toLowerCase();
-    const generator = document.querySelector('meta[name="generator"]')?.getAttribute('content')?.toLowerCase() ?? '';
+    const generatorMarker = generator?.toLowerCase() ?? '';
 
     return {
       title: clean(document.title, 300) || undefined,
@@ -167,7 +193,16 @@ const extractContext = async (
       animations,
       scripts,
       stylesheets,
-      markers: { documentMarkers, resources, generator },
+      metadata: {
+        description,
+        generator,
+        canonicalUrl,
+        faviconUrls,
+        openGraph,
+        twitter,
+        htmlLang: clean(document.documentElement.lang, 40) || undefined,
+      },
+      markers: { documentMarkers, resources, generator: generatorMarker },
     };
   });
 
@@ -202,6 +237,7 @@ const extractContext = async (
     scripts: extracted.scripts,
     stylesheets: extracted.stylesheets,
     technologies,
+    metadata: extracted.metadata,
   };
 };
 

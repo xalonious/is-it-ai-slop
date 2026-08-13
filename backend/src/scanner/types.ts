@@ -26,6 +26,11 @@ export interface ElementSnapshot {
   pseudoBackgroundSize: string;
   backgroundColor: string;
   backdropFilter: string;
+  boxShadow: string;
+  textShadow: string;
+  filter: string;
+  position: string;
+  pointerEvents: string;
   opacity: number;
   display: string;
   gridColumns: string;
@@ -52,6 +57,16 @@ export interface FrameworkFingerprints {
   vercel: boolean;
 }
 
+export interface MetadataSnapshot {
+  description?: string;
+  generator?: string;
+  canonicalUrl?: string;
+  faviconUrls: string[];
+  openGraph: Record<string, string>;
+  twitter: Record<string, string>;
+  htmlLang?: string;
+}
+
 export interface AnalysisContext {
   requestedUrl: string;
   finalUrl: string;
@@ -70,6 +85,7 @@ export interface AnalysisContext {
   scripts: string[];
   stylesheets: string[];
   technologies: FrameworkFingerprints;
+  metadata: MetadataSnapshot;
 }
 
 export interface PortfolioScan {
