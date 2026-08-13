@@ -71,6 +71,7 @@ jobs:
             if [ "$BACKEND_CHANGED" = "true" ]; then
               cd "$BACKEND_DIR"
               pm2 stop isitaislop || true
+              pm2 flush isitaislop || true
 
               npm ci
               rm -rf dist
