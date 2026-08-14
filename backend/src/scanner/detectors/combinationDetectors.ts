@@ -26,6 +26,7 @@ const DETECTOR_MAX_POINTS: Record<string, number> = {
   'copy-cliches': 11,
   'generic-section-sequence': 2,
   'navbar-cliche': 2,
+  'floating-icon-dock': 3,
   'project-card-matrix': 3,
   'excessive-project-badges': 4,
   'credential-marquee': 3,
@@ -82,7 +83,7 @@ const DEFINITIONS: CombinationDefinition[] = [
       groups: [
         { id: 'surface language', alternatives: ['rounded-everything', 'pill-infestation', 'glassmorphism'] },
         { id: 'card geometry', alternatives: ['bento-grid'] },
-        { id: 'icon system', alternatives: ['lucide-saturation'] },
+        { id: 'icon system', alternatives: ['lucide-saturation', 'floating-icon-dock'] },
         { id: 'reveal motion', alternatives: ['fade-up-monoculture'] },
         { id: 'fashion palette', alternatives: ['indigo-violet-wash', 'decorative-radial-blooms', 'neon-shadow-overload', 'gradient-heading'] },
       ],
@@ -115,7 +116,7 @@ const DEFINITIONS: CombinationDefinition[] = [
       minimumGroups: 2,
       groups: [
         { id: 'copy script', alternatives: ['copy-cliches'] },
-        { id: 'canonical navigation', alternatives: ['navbar-cliche'] },
+        { id: 'canonical navigation', alternatives: ['navbar-cliche', 'floating-icon-dock'] },
         { id: 'canonical section order', alternatives: ['generic-section-sequence'] },
       ],
     },

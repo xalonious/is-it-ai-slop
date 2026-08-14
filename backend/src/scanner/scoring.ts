@@ -62,6 +62,7 @@ const EVIDENCE_FAMILY: Record<string, EvidenceFamily> = {
   'copy-cliches': 'copy-patterns',
   'generic-section-sequence': 'copy-patterns',
   'navbar-cliche': 'navigation-patterns',
+  'floating-icon-dock': 'navigation-patterns',
   'numbered-micro-nav': 'navigation-patterns',
   'lucide-saturation': 'navigation-patterns',
   'project-card-matrix': 'project-presentation',

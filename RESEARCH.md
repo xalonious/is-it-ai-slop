@@ -90,6 +90,10 @@ The MVP measures clusters rather than provenance-specific signatures:
     canvases, component surfaces, utility decoration, and scripted motion are
     treated as a coordinated background-and-interface system rather than a single
     CSS value.
+13. Floating icon-only navigation docks: a detached pill containing several compact,
+    evenly spaced icon controls is treated as a weak navigation convention. It
+    contributes more meaningfully when component-library surfaces, familiar hero
+    geometry, icon saturation, or repeated motion are also present.
 
 The signals are useful because computed styles, geometry, visible text, links,
 resources, and animation metadata can be normalized from a rendered page. No ML,
