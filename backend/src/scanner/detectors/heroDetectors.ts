@@ -11,7 +11,7 @@ import {
   weightedConfidence,
 } from './helpers';
 
-const CTA_PATTERN = /view projects|see (my )?work|^contact$|contact me|get in touch|let'?s talk|download (my )?(cv|resume)|hire me|explore projects/i;
+const CTA_PATTERN = /view (?:projects|specs|modules|experience)|see (my )?work|^contact$|contact me|get in touch|let'?s talk|download (my )?(cv|resume)|hire me|explore projects/i;
 const SOCIAL_PATTERN = /github|linkedin|twitter|x\.com|dribbble|behance/i;
 const CODE_PANEL_MARKER = /(?:^|[\s_-])(?:code|editor|profile|snippet|terminal|window)(?:$|[\s_-])/i;
 const CODE_PANEL_TEXT = /(?:\b(?:const|let|var|class|function|interface)\b\s+\w+|\w+\s*[:=]\s*["'\[{]|=>|\{[\s\S]*\})/i;

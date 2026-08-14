@@ -42,6 +42,7 @@ const EVIDENCE_FAMILY: Record<string, EvidenceFamily> = {
   'decorative-radial-blooms': 'visual-atmosphere',
   'neon-shadow-overload': 'visual-atmosphere',
   'decorative-particle-field': 'visual-atmosphere',
+  'matrix-code-rain': 'visual-atmosphere',
   'fade-up-monoculture': 'motion-language',
   'motion-library': 'motion-language',
   'credential-marquee': 'motion-language',
@@ -49,9 +50,11 @@ const EVIDENCE_FAMILY: Record<string, EvidenceFamily> = {
   'monospace-command-ui': 'code-interface',
   'portfolio-telemetry-cosplay': 'code-interface',
   'faux-terminal': 'code-interface',
+  'faux-code-editor': 'code-interface',
   'developer-profile-object': 'code-interface',
   'cyber-neon-hero': 'code-interface',
   'developer-identity-console-hero': 'composition-convergence',
+  'cyber-code-editor-hero': 'composition-convergence',
   'copy-cliches': 'copy-patterns',
   'generic-section-sequence': 'copy-patterns',
   'navbar-cliche': 'navigation-patterns',
@@ -160,9 +163,11 @@ const DETECTOR_MAX_POINTS: Record<string, number> = {
   'technical-grid-background': 3,
   'tech-stack-soup': 2,
   'faux-terminal': 9,
+  'faux-code-editor': 6,
   'developer-profile-object': 5,
   'cyber-neon-hero': 5,
   'decorative-particle-field': 3,
+  'matrix-code-rain': 3,
 };
 
 const comboFindings = (findings: Finding[]): Finding[] => {
@@ -240,10 +245,11 @@ const comboFindings = (findings: Finding[]): Finding[] => {
     }));
   }
 
-  const cyberIds = ['faux-terminal', 'developer-profile-object', 'cyber-neon-hero', 'decorative-particle-field', 'paired-hero-ctas', 'fade-up-monoculture'];
+  const cyberIds = ['faux-terminal', 'faux-code-editor', 'developer-profile-object', 'cyber-neon-hero', 'decorative-particle-field', 'matrix-code-rain', 'paired-hero-ctas', 'fade-up-monoculture'];
   const cyberMatches = matches(cyberIds);
-  const hasCodeInterface = ids.has('faux-terminal') || ids.has('developer-profile-object');
-  if (!ids.has('developer-identity-console-hero') && cyberMatches.length >= 4 && hasCodeInterface && ids.has('cyber-neon-hero')) {
+  const hasCodeInterface = ids.has('faux-terminal') || ids.has('faux-code-editor') || ids.has('developer-profile-object');
+  const hasSpatialCyberComposition = ids.has('developer-identity-console-hero') || ids.has('cyber-code-editor-hero');
+  if (!hasSpatialCyberComposition && cyberMatches.length >= 4 && hasCodeInterface && ids.has('cyber-neon-hero')) {
     combos.push(...createMeasuredFinding('combo-developer-command-center', 'template', 'Developer command-center convergence', 'Terminal cosplay, neon presentation, decorative atmosphere, and familiar hero behavior combine into a recognizable cyber-portfolio template.', {
       confidence: confidence(cyberIds, 4), maximumPoints: 10, minimumConfidence: 0.45, evidence: cyberMatches,
     }));

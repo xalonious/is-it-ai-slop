@@ -17,6 +17,12 @@ interface TerminalCandidate {
   systemFields: string[];
 }
 
+interface CodeEditorCandidate {
+  element: ElementSnapshot;
+  score: number;
+  signals: string[];
+}
+
 const parseRgb = (value: string): [number, number, number] | undefined => {
   const match = value.match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/i);
   return match ? [Number(match[1]), Number(match[2]), Number(match[3])] : undefined;
@@ -90,6 +96,69 @@ const hasSaturatedGlow = (element: ElementSnapshot): boolean => {
   return [...shadows.matchAll(SHADOW_BLUR)].some((match) => Number(match[1] ?? match[2]) >= 6);
 };
 
+const CODE_EDITOR_MARKER = /(?:^|[\s_-])(?:code|editor|ide|snippet|source|studio|window)(?:$|[\s_-])/i;
+const CODE_FILE_OR_TOOL = /\b(?:vscode|visual studio|roblox.?studio|code.?server)|\b[\w-]+\.(?:[cm]?[jt]sx?|py|lua|luau|go|rs|cs|java|json|rb|php)\b/i;
+const CODE_KEYWORD = /\b(?:async|await|class|const|end|export|function|if|import|interface|let|local|new|private|public|return|self|this|var)\b/gi;
+const CODE_OPERATOR = /(?:=>|::|\.\w+\s*\(|\w+\s*[:=]\s*(?:["'\[{]|new\b)|[{}][,;]?)/g;
+
+const codeEditorCandidate = (
+  context: AnalysisContext,
+  element: ElementSnapshot,
+): CodeEditorCandidate | undefined => {
+  if (
+    element.rect.y >= 1000 ||
+    element.rect.width < 280 || element.rect.width > Math.min(900, context.viewport.width * 0.62) ||
+    element.rect.height < 150 || element.rect.height > 760 ||
+    element.text.length < 70
+  ) return undefined;
+
+  const markerText = `${element.tag} ${element.classes.join(' ')} ${element.ariaLabel ?? ''}`;
+  const namedEditor = CODE_EDITOR_MARKER.test(markerText) || CODE_FILE_OR_TOOL.test(element.text);
+  const preformatted = /^(?:code|pre|samp)$/.test(element.tag) || /^(?:pre|pre-wrap|break-spaces)$/.test(element.whiteSpace);
+  const monospace = MONOSPACE_FONT.test(element.fontFamily) || preformatted;
+  const keywords = [...new Set(element.text.match(CODE_KEYWORD)?.map((keyword) => keyword.toLowerCase()) ?? [])];
+  const operators = element.text.match(CODE_OPERATOR)?.length ?? 0;
+  const dark = isDarkSurface(element);
+  const chromeDots = context.elements.filter((candidate) =>
+    candidate.nodeIndex !== element.nodeIndex &&
+    candidate.rect.width >= 6 && candidate.rect.width <= 18 &&
+    candidate.rect.height >= 6 && candidate.rect.height <= 18 &&
+    candidate.borderRadius >= Math.min(candidate.rect.width, candidate.rect.height) * 0.4 &&
+    candidate.rect.x >= element.rect.x &&
+    candidate.rect.x + candidate.rect.width <= element.rect.x + element.rect.width &&
+    candidate.rect.y >= element.rect.y &&
+    candidate.rect.y <= element.rect.y + 70 &&
+    hasSaturatedComputedColor(candidate.backgroundColor),
+  ).length;
+
+  let score = 0;
+  const signals: string[] = [];
+  if (namedEditor) { score += 2; signals.push('editor, IDE, or source-file labeling'); }
+  if (preformatted) { score += 1; signals.push('preformatted code structure'); }
+  if (monospace) { score += 1; signals.push('monospace source typography'); }
+  if (keywords.length >= 4) { score += 3; signals.push(`${keywords.length} distinct programming keywords`); }
+  else if (keywords.length >= 2) { score += 2; signals.push(`${keywords.length} distinct programming keywords`); }
+  if (operators >= 4) { score += 2; signals.push(`${operators} code operators or assignments`); }
+  else if (operators >= 2) { score += 1; signals.push(`${operators} code operators or assignments`); }
+  if (dark) { score += 1; signals.push('dark editor surface'); }
+  if (chromeDots >= 3) { score += 2; signals.push('three-dot desktop window chrome'); }
+
+  const hasCodeSemantics = keywords.length >= 2 && operators >= 2;
+  const hasEditorPresentation = namedEditor || (monospace && dark) || (preformatted && monospace);
+  return hasCodeSemantics && hasEditorPresentation && score >= 5
+    ? { element, score, signals }
+    : undefined;
+};
+
+const codeEditorCandidates = (context: AnalysisContext): CodeEditorCandidate[] =>
+  context.elements
+    .map((element) => codeEditorCandidate(context, element))
+    .filter((candidate): candidate is CodeEditorCandidate => Boolean(candidate))
+    .sort((left, right) =>
+      right.score - left.score ||
+      left.element.rect.width * left.element.rect.height - right.element.rect.width * right.element.rect.height,
+    );
+
 const profileFields = [
   ['name', /(?:["']?name["']?\s*[:=]|this\.name\s*=)/i],
   ['location', /(?:["']?location["']?\s*[:=]|this\.location\s*=)/i],
@@ -103,7 +172,8 @@ const profileFields = [
 const CODE_PROFILE_PRESENTATION = /profile\.json|developer profile|class\s+\w*(?:developer|engineer)|new\s+\w*(?:developer|engineer)\s*\(|(?:const|let|var)\s+\w+\s*=\s*(?:new\s*)?\{|terminal|code.?window|editor.?window/i;
 const DEVELOPER_IDENTITY = /developer|engineer|software|full.?stack|front.?end|back.?end/i;
 const AVAILABILITY_PILL = /\b(?:available|open)\b.{0,50}\b(?:freelance|full.?time|hire|work|opportunit|collaborat)/i;
-const HERO_CTA = /view projects|see (?:my )?work|contact|get in touch|let'?s talk|hire me/i;
+const HERO_CTA = /view (?:projects|specs|modules|experience)|see (?:my )?work|contact|get in touch|let'?s talk|hire me/i;
+const SYSTEM_STATUS_PILL = /\b(?:system|server|network|node|core)\s*(?:is\s*)?(?:online|ready|active|connected|operational)\b/i;
 
 interface DeveloperProfileCandidate {
   element: ElementSnapshot;
@@ -170,6 +240,30 @@ export const cyberDetectors: Detector[] = [
             ...(match.systemFields.length ? [`System fields: ${match.systemFields.join(', ')}`] : []),
             match.element.text.slice(0, 140),
           ],
+        },
+      );
+    },
+  },
+  {
+    id: 'faux-code-editor',
+    category: 'template',
+    analyze(context) {
+      if (!context.isEntryPage) return [];
+      const match = codeEditorCandidates(context)[0];
+      return createMeasuredFinding(
+        this.id,
+        this.category,
+        'Decorative source-code window',
+        'A substantial syntax-heavy editor or IDE window is used as hero decoration.',
+        {
+          confidence: match ? ramp(match.score, 4, 11) : 0,
+          maximumPoints: 6,
+          minimumConfidence: 0.35,
+          evidence: match ? [
+            `${match.element.rect.width}x${match.element.rect.height}px code-editor region`,
+            ...match.signals.slice(0, 6),
+            match.element.text.slice(0, 140),
+          ] : [],
         },
       );
     },
@@ -303,6 +397,135 @@ export const cyberDetectors: Detector[] = [
     },
   },
   {
+    id: 'cyber-code-editor-hero',
+    category: 'template',
+    analyze(context) {
+      if (!context.isEntryPage) return [];
+      const heading = mainHeading(context);
+      if (!heading || heading.rect.x > context.viewport.width * 0.48) return [];
+
+      const statusBadge = context.elements
+        .filter((element) =>
+          element.text.length > 0 && element.text.length <= 90 &&
+          SYSTEM_STATUS_PILL.test(element.text) &&
+          element.rect.height >= 18 && element.rect.height <= 64 &&
+          element.rect.width >= element.rect.height * 1.5 &&
+          element.rect.y < heading.rect.y &&
+          heading.rect.y - element.rect.y <= 200,
+        )
+        .sort((left, right) => Math.abs(heading.rect.y - left.rect.y) - Math.abs(heading.rect.y - right.rect.y))[0];
+      if (!statusBadge) return [];
+
+      const editor = codeEditorCandidates(context).find(({ element }) => {
+        const editorCenterX = element.rect.x + element.rect.width / 2;
+        const headingCenterX = heading.rect.x + heading.rect.width / 2;
+        return editorCenterX > headingCenterX &&
+          element.rect.x >= context.viewport.width * 0.43 &&
+          element.rect.y <= heading.rect.y + heading.rect.height + 500 &&
+          element.rect.y + element.rect.height >= statusBadge.rect.y - 20;
+      });
+      if (!editor) return [];
+
+      const heroBottom = Math.max(
+        heading.rect.y + heading.rect.height + 520,
+        editor.element.rect.y + editor.element.rect.height + 80,
+      );
+      const heroElements = context.elements.filter((element) => element.rect.y >= -20 && element.rect.y <= heroBottom);
+      const darkCanvas = heroElements.some((element) =>
+        isDarkSurface(element) &&
+        element.rect.width >= context.viewport.width * 0.65 &&
+        element.rect.height >= context.viewport.height * 0.45,
+      );
+      const saturatedAccents = heroElements.filter((element) =>
+        hasSaturatedComputedColor(`${element.backgroundColor} ${element.backgroundImage} ${element.boxShadow} ${element.textShadow}`),
+      ).length;
+      const technicalTheme = darkCanvas && saturatedAccents >= 4 &&
+        heroElements.filter((element) => MONOSPACE_FONT.test(element.fontFamily)).length >= 3;
+      if (!technicalTheme) return [];
+
+      const markers = context.documentMarkers.toLowerCase();
+      const matrixRain = /matrix(?:[-_ ]?(?:canvas|rain|code))|digital[-_ ]?rain|code[-_ ]?rain/.test(markers);
+      const technicalGrid = heroElements.some((element) => {
+        const gradients = element.backgroundImage.match(/(?:repeating-)?linear-gradient/gi)?.length ?? 0;
+        return gradients >= 2 &&
+          element.rect.width >= context.viewport.width * 0.65 &&
+          element.rect.height >= context.viewport.height * 0.45;
+      });
+      const controls = [...context.links, ...context.buttons.filter((button) => button.tag === 'button')];
+      const commandNavigation = controls.filter((element) => {
+        const text = element.text.trim();
+        return element.rect.y < 260 && text.length > 1 && text.length <= 32 &&
+          MONOSPACE_FONT.test(element.fontFamily) &&
+          (/^_?[A-Z0-9()[\]{}<>./:+-]+$/.test(text) || /^_[a-z0-9-]+$/i.test(text));
+      }).length >= 3;
+      const pairedCtas = controls.filter((element) =>
+        element.rect.y <= heroBottom &&
+        Math.abs(element.rect.y - heading.rect.y) <= 520 &&
+        HERO_CTA.test(element.text),
+      ).length >= 2;
+      const codeBrand = heroElements.some((element) =>
+        element.text.length > 2 && element.text.length < 70 &&
+        /<\/?[a-z][^>]*>|<[^>]+\/>/i.test(element.text) &&
+        MONOSPACE_FONT.test(element.fontFamily),
+      );
+      const repeatedMotion = context.animations.length >= 5 ||
+        heroElements.filter((element) => element.animationName && element.animationName !== 'none').length >= 8;
+      const supporters = [
+        matrixRain ? 'matrix-style code-rain canvas' : undefined,
+        technicalGrid ? 'full-hero technical grid' : undefined,
+        commandNavigation ? 'command-styled navigation' : undefined,
+        pairedCtas ? 'paired portfolio calls-to-action' : undefined,
+        codeBrand ? 'code-styled identity mark' : undefined,
+        repeatedMotion ? 'repeated hero motion treatment' : undefined,
+        `${saturatedAccents} saturated blue/neon accents`,
+      ].filter((value): value is string => Boolean(value));
+      if (supporters.length < 3) return [];
+
+      const horizontalSeparation = ramp(
+        editor.element.rect.x - (heading.rect.x + heading.rect.width),
+        -80,
+        180,
+      );
+      const verticalAlignment = 1 - ramp(
+        Math.abs(editor.element.rect.y - heading.rect.y),
+        80,
+        430,
+      );
+      const geometryConfidence = Math.max(0.5, weightedConfidence([
+        { confidence: horizontalSeparation, weight: 0.6 },
+        { confidence: verticalAlignment, weight: 0.4 },
+      ]));
+      const coreConfidence = geometricMean([
+        ramp(editor.score, 4, 11),
+        geometryConfidence,
+        ramp(saturatedAccents, 3, 10),
+        1,
+      ]);
+      const confidence = weightedConfidence([
+        { confidence: coreConfidence, weight: 0.8 },
+        { confidence: ramp(supporters.length, 2, 7), weight: 0.2 },
+      ]);
+
+      return createMeasuredFinding(
+        this.id,
+        this.category,
+        'Cyber code-editor hero constellation',
+        'A system-status badge, adjacent source editor, command interface, and animated technical canvas converge into a generator-era cyber portfolio hero.',
+        {
+          confidence,
+          maximumPoints: 12,
+          minimumConfidence: 0.55,
+          evidence: [
+            `System-status badge: ${statusBadge.text.slice(0, 90)}`,
+            `${editor.element.rect.width}x${editor.element.rect.height}px code editor beside the heading`,
+            ...editor.signals.slice(0, 4),
+            ...supporters,
+          ],
+        },
+      );
+    },
+  },
+  {
     id: 'cyber-neon-hero',
     category: 'layout',
     analyze(context) {
@@ -358,6 +581,18 @@ export const cyberDetectors: Detector[] = [
           `${monospaceElements} hero monospace elements and ${codeInterfaceElements} code-interface cues`,
         ],
       });
+    },
+  },
+  {
+    id: 'matrix-code-rain',
+    category: 'template',
+    analyze(context) {
+      if (!context.isEntryPage) return [];
+      const markers = context.documentMarkers.toLowerCase();
+      const matches = [...new Set(markers.match(/matrix(?:[-_ ]?(?:canvas|rain|code))|digital[-_ ]?rain|code[-_ ]?rain/g) ?? [])];
+      return matches.length
+        ? [createFinding(this.id, this.category, 'Matrix-style code rain', 'A full-screen digital-rain layer turns the portfolio backdrop into a familiar hacker-interface canvas.', 3, matches.slice(0, 5))]
+        : [];
     },
   },
   {
