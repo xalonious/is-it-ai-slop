@@ -13,6 +13,9 @@ import {
 
 const CTA_PATTERN = /view projects|see (my )?work|^contact$|contact me|get in touch|let'?s talk|download (my )?(cv|resume)|hire me|explore projects/i;
 const SOCIAL_PATTERN = /github|linkedin|twitter|x\.com|dribbble|behance/i;
+const CODE_PANEL_MARKER = /(?:^|[\s_-])(?:code|editor|profile|snippet|terminal|window)(?:$|[\s_-])/i;
+const CODE_PANEL_TEXT = /(?:\b(?:const|let|var|class|function|interface)\b\s+\w+|\w+\s*[:=]\s*["'\[{]|=>|\{[\s\S]*\})/i;
+const MONOSPACE_FONT = /(?:cascadia|code|consolas|courier|fira|hack|ibm plex mono|inconsolata|menlo|monaco|mono|source code|terminal)/i;
 const TRANSIENT_STATUS = /^(?:loading|please wait|initializing|connecting|fetching|preparing|booting|starting)(?:[\s.!â€¦_-].*)?$/i;
 
 const isTransientStatus = (element: ElementSnapshot): boolean => {
@@ -93,9 +96,21 @@ export const heroDetectors: Detector[] = [
       if (!context.isEntryPage) return [];
       const heading = mainHeading(context);
       if (!heading || heading.rect.x > context.viewport.width * 0.48) return [];
-      const rightVisual = context.images.find(
-        (image) => inHero(image) && image.rect.x > context.viewport.width * 0.5 && image.rect.width > 220 && image.rect.height > 220,
-      );
+      const rightVisual = [...context.images, ...context.elements.filter((element) =>
+        element.text.length >= 60 &&
+        element.rect.width <= context.viewport.width * 0.48 &&
+        (
+          CODE_PANEL_MARKER.test(`${element.classes.join(' ')} ${element.ariaLabel ?? ''}`) ||
+          (MONOSPACE_FONT.test(element.fontFamily) && CODE_PANEL_TEXT.test(element.text))
+        ),
+      )]
+        .filter((element) =>
+          inHero(element) &&
+          element.rect.x > context.viewport.width * 0.43 &&
+          element.rect.width > 220 &&
+          element.rect.height > 180,
+        )
+        .sort((left, right) => left.rect.width * left.rect.height - right.rect.width * right.rect.height)[0];
       return createMeasuredFinding(this.id, this.category, 'Split-screen hero formation', 'Large introductory copy is paired with a substantial visual on the right.', {
         confidence: rightVisual ? weightedConfidence([
           { confidence: inverseRamp(heading.rect.x / context.viewport.width, 0.2, 0.48), weight: 0.35 },
@@ -103,7 +118,7 @@ export const heroDetectors: Detector[] = [
         ]) : 0,
         maximumPoints: 3,
         minimumConfidence: 0.45,
-        evidence: rightVisual ? [`Heading begins at x=${heading.rect.x}px`, `Right-side visual is ${rightVisual.rect.width}×${rightVisual.rect.height}px`] : [],
+        evidence: rightVisual ? [`Heading begins at x=${heading.rect.x}px`, `Right-side visual is ${rightVisual.rect.width}×${rightVisual.rect.height}px`, rightVisual.tag === 'img' ? 'Image presentation' : 'Code-panel presentation'] : [],
       });
     },
   },

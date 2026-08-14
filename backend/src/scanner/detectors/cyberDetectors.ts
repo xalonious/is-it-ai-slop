@@ -1,5 +1,5 @@
-import type { Detector, ElementSnapshot } from '../types';
-import { createFinding, createMeasuredFinding, mainHeading, ramp, weightedConfidence } from './helpers';
+import type { AnalysisContext, Detector, ElementSnapshot } from '../types';
+import { clamp01, createFinding, createMeasuredFinding, isPill, mainHeading, ramp, weightedConfidence } from './helpers';
 
 const elementMarkers = (classes: string[]): string => classes.join(' ').toLowerCase();
 
@@ -91,13 +91,51 @@ const hasSaturatedGlow = (element: ElementSnapshot): boolean => {
 };
 
 const profileFields = [
-  ['name', /(?:["']?name["']?\s*:|this\.name\s*=)/i],
-  ['location', /(?:["']?location["']?\s*:|this\.location\s*=)/i],
-  ['role', /(?:["']?role["']?\s*:|this\.role\s*=)/i],
-  ['stack', /(?:["']?(?:stack|skills|technologies)["']?\s*:|this\.(?:stack|skills|technologies)\s*=)/i],
-  ['github', /(?:["']?github["']?\s*:|this\.github\s*=)/i],
+  ['name', /(?:["']?name["']?\s*[:=]|this\.name\s*=)/i],
+  ['location', /(?:["']?location["']?\s*[:=]|this\.location\s*=)/i],
+  ['role', /(?:["']?role["']?\s*[:=]|this\.role\s*=)/i],
+  ['stack', /(?:["']?(?:techStack|stack|skills|technologies)["']?\s*[:=]|this\.(?:techStack|stack|skills|technologies)\s*=)/i],
+  ['github', /(?:["']?github["']?\s*[:=]|this\.github\s*=)/i],
   ['availability', /(?:openToWork|availableForWork|available|this\.openToWork)\s*[:=]/i],
+  ['status', /(?:["']?status["']?\s*[:=]|this\.status\s*=)/i],
 ] as const;
+
+const CODE_PROFILE_PRESENTATION = /profile\.json|developer profile|class\s+\w*(?:developer|engineer)|new\s+\w*(?:developer|engineer)\s*\(|(?:const|let|var)\s+\w+\s*=\s*(?:new\s*)?\{|terminal|code.?window|editor.?window/i;
+const DEVELOPER_IDENTITY = /developer|engineer|software|full.?stack|front.?end|back.?end/i;
+const AVAILABILITY_PILL = /\b(?:available|open)\b.{0,50}\b(?:freelance|full.?time|hire|work|opportunit|collaborat)/i;
+const HERO_CTA = /view projects|see (?:my )?work|contact|get in touch|let'?s talk|hire me/i;
+
+interface DeveloperProfileCandidate {
+  element: ElementSnapshot;
+  fields: string[];
+}
+
+const developerProfileCandidates = (context: AnalysisContext): DeveloperProfileCandidate[] =>
+  context.elements
+    .map((element) => {
+      const value = `${elementMarkers(element.classes)} ${element.text}`;
+      const fields = profileFields.filter(([, pattern]) => pattern.test(value)).map(([field]) => field);
+      return {
+        element,
+        fields,
+        codePresentation: CODE_PROFILE_PRESENTATION.test(value),
+        developerIdentity: DEVELOPER_IDENTITY.test(value),
+      };
+    })
+    .filter(({ element, fields, codePresentation, developerIdentity }) =>
+      element.rect.y < 1000 &&
+      element.rect.width >= 300 && element.rect.width <= 850 &&
+      element.rect.height >= 150 && element.rect.height <= 750 &&
+      element.text.length >= 80 &&
+      fields.length >= 2 &&
+      codePresentation &&
+      developerIdentity,
+    )
+    .sort((left, right) => left.element.rect.width * left.element.rect.height - right.element.rect.width * right.element.rect.height)
+    .map(({ element, fields }) => ({ element, fields }));
+
+const geometricMean = (values: number[]): number =>
+  values.length ? Math.pow(values.reduce((product, value) => product * clamp01(value), 1), 1 / values.length) : 0;
 
 export const cyberDetectors: Detector[] = [
   {
@@ -141,24 +179,7 @@ export const cyberDetectors: Detector[] = [
     category: 'template',
     analyze(context) {
       if (!context.isEntryPage) return [];
-      const matches = context.elements
-        .map((element) => {
-          const value = `${elementMarkers(element.classes)} ${element.text}`;
-          const fields = profileFields.filter(([, pattern]) => pattern.test(value)).map(([field]) => field);
-          const codePresentation = /profile\.json|developer profile|class\s+\w*(?:developer|engineer)|new\s+\w*(?:developer|engineer)\s*\(|(?:const|let|var)\s+\w+\s*=\s*\{|terminal|code.?window|editor.?window/i.test(value);
-          const developerIdentity = /developer|engineer|software|full.?stack|front.?end|back.?end/i.test(value);
-          return { element, fields, codePresentation, developerIdentity };
-        })
-        .filter(({ element, fields, codePresentation, developerIdentity }) =>
-          element.rect.y < 1000 &&
-          element.rect.width >= 300 && element.rect.width <= 850 &&
-          element.rect.height >= 150 && element.rect.height <= 750 &&
-          element.text.length >= 80 &&
-          fields.length >= 2 &&
-          codePresentation &&
-          developerIdentity,
-        )
-        .sort((left, right) => left.element.rect.width * left.element.rect.height - right.element.rect.width * right.element.rect.height);
+      const matches = developerProfileCandidates(context);
       const match = matches[0];
       return createMeasuredFinding(this.id, this.category, 'Developer object instantiated', 'The hero serializes the developer into a faux code object or profile file.', {
         confidence: match ? ramp(match.fields.length, 2, 6) : 0,
@@ -166,6 +187,119 @@ export const cyberDetectors: Detector[] = [
         minimumConfidence: 0.3,
         evidence: match ? [`${match.element.rect.width}x${match.element.rect.height}px code-profile panel`, `${match.fields.length} profile fields: ${match.fields.join(', ')}`, match.element.text.slice(0, 140)] : [],
       });
+    },
+  },
+  {
+    id: 'developer-identity-console-hero',
+    category: 'template',
+    analyze(context) {
+      if (!context.isEntryPage) return [];
+      const heading = mainHeading(context);
+      if (!heading || heading.rect.x > context.viewport.width * 0.48) return [];
+
+      const availability = context.elements
+        .filter((element) =>
+          element.text.length > 0 &&
+          element.text.length <= 90 &&
+          AVAILABILITY_PILL.test(element.text) &&
+          isPill(element) &&
+          element.rect.y < heading.rect.y &&
+          heading.rect.y - element.rect.y <= 190,
+        )
+        .sort((left, right) => Math.abs(heading.rect.y - left.rect.y) - Math.abs(heading.rect.y - right.rect.y))[0];
+      if (!availability) return [];
+
+      const profile = developerProfileCandidates(context).find(({ element }) => {
+        const panelCenterX = element.rect.x + element.rect.width / 2;
+        const headingCenterX = heading.rect.x + heading.rect.width / 2;
+        const verticallyRelated = element.rect.y <= heading.rect.y + heading.rect.height + 520 &&
+          element.rect.y + element.rect.height >= availability.rect.y - 20;
+        return panelCenterX > headingCenterX &&
+          element.rect.x >= context.viewport.width * 0.43 &&
+          verticallyRelated;
+      });
+      if (!profile) return [];
+
+      const heroBottom = Math.max(
+        heading.rect.y + heading.rect.height + 520,
+        profile.element.rect.y + profile.element.rect.height + 80,
+      );
+      const heroElements = context.elements.filter((element) => element.rect.y >= -20 && element.rect.y <= heroBottom);
+      const darkCanvas = heroElements.some((element) =>
+        isDarkSurface(element) &&
+        element.rect.width >= context.viewport.width * 0.65 &&
+        element.rect.height >= context.viewport.height * 0.45,
+      );
+      const saturatedAccents = heroElements.filter((element) =>
+        hasSaturatedComputedColor(`${element.backgroundColor} ${element.backgroundImage} ${element.boxShadow} ${element.textShadow}`),
+      ).length;
+      const controls = [...context.links, ...context.buttons.filter((button) => button.tag === 'button')];
+      const pairedCtas = controls.filter((element) =>
+        element.rect.y <= heroBottom &&
+        Math.abs(element.rect.y - heading.rect.y) <= 520 &&
+        HERO_CTA.test(element.text),
+      ).length >= 2;
+      const codeBrand = heroElements.some((element) =>
+        element.text.length > 2 && element.text.length < 70 &&
+        /<\/?[a-z][^>]*>|<[^>]+\/>/i.test(element.text) &&
+        MONOSPACE_FONT.test(element.fontFamily),
+      );
+      const trustBadges = [
+        /git(?:hub)?\s+native/i,
+        /cloudflare\s+deployed/i,
+        /ssl\s+certified/i,
+        /(?:production|live)\s+(?:ready|deployed)/i,
+      ].filter((pattern) => pattern.test(context.visibleText)).length >= 2;
+      const supporters = [
+        darkCanvas ? 'dark hero canvas' : undefined,
+        saturatedAccents >= 4 ? `${saturatedAccents} saturated blue/neon accents` : undefined,
+        pairedCtas ? 'paired portfolio calls-to-action' : undefined,
+        codeBrand ? 'code-styled identity mark' : undefined,
+        trustBadges ? 'deployment or security badge strip' : undefined,
+      ].filter((value): value is string => Boolean(value));
+      if (supporters.length < 2) return [];
+
+      const horizontalSeparation = ramp(
+        profile.element.rect.x - (heading.rect.x + heading.rect.width),
+        -80,
+        180,
+      );
+      const verticalAlignment = 1 - ramp(
+        Math.abs(profile.element.rect.y - heading.rect.y),
+        80,
+        430,
+      );
+      const geometryConfidence = Math.max(0.5, weightedConfidence([
+        { confidence: horizontalSeparation, weight: 0.6 },
+        { confidence: verticalAlignment, weight: 0.4 },
+      ]));
+      const coreConfidence = geometricMean([
+        ramp(profile.fields.length, 2, 6),
+        geometryConfidence,
+        1,
+      ]);
+      const confidence = weightedConfidence([
+        { confidence: coreConfidence, weight: 0.8 },
+        { confidence: ramp(supporters.length, 1, 5), weight: 0.2 },
+      ]);
+
+      return createMeasuredFinding(
+        this.id,
+        this.category,
+        'Developer identity console hero',
+        'An availability badge, personal code object, and dark split-screen developer pitch form a tightly coupled generator-era hero composition.',
+        {
+          confidence,
+          maximumPoints: 12,
+          minimumConfidence: 0.55,
+          evidence: [
+            `Availability pill: ${availability.text.slice(0, 90)}`,
+            `${profile.element.rect.width}x${profile.element.rect.height}px code-profile panel beside the heading`,
+            `${profile.fields.length} profile fields: ${profile.fields.join(', ')}`,
+            ...supporters,
+          ],
+        },
+      );
     },
   },
   {

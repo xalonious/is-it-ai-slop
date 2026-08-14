@@ -20,7 +20,8 @@ type EvidenceFamily =
   | 'navigation-patterns'
   | 'project-presentation'
   | 'stack-presentation'
-  | 'implementation-residue';
+  | 'implementation-residue'
+  | 'composition-convergence';
 
 const EVIDENCE_FAMILY: Record<string, EvidenceFamily> = {
   'hero-pill': 'hero-composition',
@@ -50,6 +51,7 @@ const EVIDENCE_FAMILY: Record<string, EvidenceFamily> = {
   'faux-terminal': 'code-interface',
   'developer-profile-object': 'code-interface',
   'cyber-neon-hero': 'code-interface',
+  'developer-identity-console-hero': 'composition-convergence',
   'copy-cliches': 'copy-patterns',
   'generic-section-sequence': 'copy-patterns',
   'navbar-cliche': 'navigation-patterns',
@@ -241,7 +243,7 @@ const comboFindings = (findings: Finding[]): Finding[] => {
   const cyberIds = ['faux-terminal', 'developer-profile-object', 'cyber-neon-hero', 'decorative-particle-field', 'paired-hero-ctas', 'fade-up-monoculture'];
   const cyberMatches = matches(cyberIds);
   const hasCodeInterface = ids.has('faux-terminal') || ids.has('developer-profile-object');
-  if (cyberMatches.length >= 4 && hasCodeInterface && ids.has('cyber-neon-hero')) {
+  if (!ids.has('developer-identity-console-hero') && cyberMatches.length >= 4 && hasCodeInterface && ids.has('cyber-neon-hero')) {
     combos.push(...createMeasuredFinding('combo-developer-command-center', 'template', 'Developer command-center convergence', 'Terminal cosplay, neon presentation, decorative atmosphere, and familiar hero behavior combine into a recognizable cyber-portfolio template.', {
       confidence: confidence(cyberIds, 4), maximumPoints: 10, minimumConfidence: 0.45, evidence: cyberMatches,
     }));
