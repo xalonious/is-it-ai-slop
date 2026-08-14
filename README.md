@@ -6,18 +6,20 @@ The score is a heuristic, not an AI-authorship detector. It describes how strong
 
 ## Overview
 
-The backend opens the submitted site in a headless Chromium browser and records visible text, layout measurements, computed styles, links, images, animations, and framework fingerprints. It follows a bounded set of same-origin links, prioritizing project, work, and about pages, then runs a collection of independent detectors over each rendered page.
+The backend opens the submitted site in a headless Chromium browser, waits for meaningful content to replace loading or splash states, and records visible text, layout measurements, computed styles, links, images, animations, and framework fingerprints. It follows a bounded set of same-origin links, prioritizing project, work, and about pages, then runs a collection of independent detectors over each rendered page.
 
 Duplicate findings are merged across pages so a repeated pattern does not receive the same points several times. The final report groups the findings into layout, copy, stack, motion, and template categories and shows the observed evidence for each one.
 
 ## Features
 
 - Rendered-page analysis through Playwright rather than raw HTML matching
+- Bounded page-readiness polling for loading screens, splash overlays, and client-rendered content
 - Bounded same-origin crawling with project, work, and about page prioritization
-- Detection of repeated portfolio patterns such as bento grids, glassmorphism, excessive pills, rounded surfaces, indigo-to-violet background washes, decorative radial blooms, neon-shadow overload, default framework metadata, faux terminals, cyber-neon heroes, generic copy, familiar hero layouts, and fade-up animation monocultures
+- Detection of repeated portfolio patterns such as bento grids, glassmorphism, excessive pills, rounded surfaces, animated profile heroes, developer command centers, faux terminals and code editors, technical canvases, cyber-neon heroes, generic copy, familiar hero layouts, and fade-up animation monocultures
 - Evidence-backed findings with the page on which each signal appeared
 - Category scores for layout, copy, stack, motion, and template energy
-- Combination, breadth, and density bonuses for clusters of otherwise ordinary signals
+- Anchored, confidence-weighted pattern constellations for clusters of otherwise ordinary signals
+- Evidence-family diminishing returns, bounded combination points, breadth bonuses, and score ceilings
 - SSRF protection for private, loopback, link-local, reserved, and internal network targets
 - Redirect validation, navigation limits, overall scan timeouts, and concurrency limits
 - IP-based rate limiting of ten analysis requests every five minutes
@@ -138,11 +140,12 @@ Open `http://localhost:5173` and submit a public portfolio URL. The API health e
 
 1. The submitted address is normalized and resolved through DNS.
 2. Private, internal, reserved, and unsupported addresses are rejected before Chromium is launched.
-3. Playwright renders the landing page and records visible elements, computed styles, text, animations, resources, and links.
-4. The crawler follows a small number of same-origin HTML pages. Project, portfolio, work, case-study, and about routes receive priority.
-5. Every page is evaluated by the detector collection. Landing-page-specific hero detectors only run against the entry page.
-6. Duplicate detector hits are merged and retain evidence from the pages on which they appeared.
-7. The scoring layer applies category caps, combination findings, and limited breadth and density bonuses before clamping the final score to `0–100`.
+3. Playwright renders the landing page and polls until meaningful content is stable and any viewport-blocking loading state has disappeared. The readiness wait is bounded so a broken splash screen cannot hang the scan.
+4. The scanner records visible elements, computed styles, text, animations, resources, and links from the settled page.
+5. The crawler follows a small number of same-origin HTML pages. Project, portfolio, work, case-study, and about routes receive priority.
+6. Every page is evaluated by the detector collection. Landing-page-specific hero detectors only run against the entry page.
+7. Duplicate detector hits are merged and retain evidence from the pages on which they appeared.
+8. The scoring layer applies evidence-family diminishing returns, category caps, anchored combination findings, a limited breadth bonus, and evidence-family score ceilings before clamping the final score to `0–100`.
 
 Assets, API routes, authentication routes, downloads, cross-origin redirects, and repeated URL variants are excluded from the crawl. A failure on a secondary page does not discard a successful landing-page scan.
 
@@ -158,7 +161,11 @@ The five report categories have independent display caps:
 | Motion | 12 |
 | Template | 40 |
 
-The overall score is based on detector points rather than an average of these category percentages. Most visual and structural detectors measure a confidence curve across several features instead of switching on at one exact count. Strong clusters can add confidence-weighted combination bonuses, while findings spread across several categories add smoothly capped breadth and density bonuses.
+The overall score is based on detector points rather than an average of these category percentages. Most visual and structural detectors measure a confidence curve across several features instead of switching on at one exact count.
+
+Combination detectors use an anchored constellation model: at least one defining signal must be present, while supporting groups accept interchangeable evidence. A developer command-center pattern can therefore survive one missing decorative cue without allowing an isolated terminal, pill, gradient, or dark background to trigger the full bonus. Combination points are capped at 20% of the base detector score.
+
+Related findings are grouped into evidence families and receive diminishing returns, preventing several descriptions of the same visual choice from stacking at full value. Evidence spread across independent families earns a small breadth bonus and controls the maximum reachable score.
 
 | Score | Severity |
 | ---: | --- |
@@ -217,7 +224,6 @@ Run these commands from the indicated directory.
 | --- | --- | --- |
 | `backend/` | `npm run dev` | Start the API with automatic TypeScript restarts |
 | `backend/` | `npm run build` | Compile the backend TypeScript |
-| `backend/` | `npm test` | Run the backend test suite |
 | `frontend/` | `npm run dev` | Start the Vite development server |
 | `frontend/` | `npm run build` | Type-check and create a production frontend build |
 | `frontend/` | `npm run preview` | Preview the production frontend build |

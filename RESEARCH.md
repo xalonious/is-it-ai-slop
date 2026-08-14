@@ -1,6 +1,6 @@
 # SlopScore research notes
 
-Research performed on 2026-08-12. The scanner is deliberately heuristic: these
+Research performed between 2026-08-12 and 2026-08-14. The scanner is deliberately heuristic: these
 patterns are common across hand-built, templated, and AI-assisted sites. They are
 observable fingerprints, never proof of authorship.
 
@@ -73,12 +73,29 @@ The MVP measures clusters rather than provenance-specific signatures:
    monospace structure, dark surfaces, and terminal component markers are scored
    as a cluster. A viewport-dominating terminal scores more than a contained
    terminal card, while ordinary documentation code blocks stay below threshold.
+9. Developer command-center compositions: code editors, serialized developer
+   objects, status badges, monospace navigation, technical grids, telemetry,
+   code-rain atmospheres, and paired calls-to-action become meaningful when they
+   occupy a coordinated hero layout. A single terminal or monospace element is
+   insufficient evidence.
+10. Animated profile compositions: a right-side portrait can combine with a role
+    typewriter, atmospheric canvas, résumé navigation, skill chips, gradient or
+    glowing calls-to-action, and a dark hero surface. The portrait geometry anchors
+    the pattern; the supporting presentation details are interchangeable.
+11. Neo-brutalist developer control panels: hard-edged geometry, command-oriented
+    typography, and decorative telemetry form a separate composition family from
+    rounded component-library defaults. Partial combinations can contribute without
+    requiring one exact color palette or layout.
+12. Technical canvases: graph-paper grids, matrix-style rain, large atmospheric
+    canvases, component surfaces, utility decoration, and scripted motion are
+    treated as a coordinated background-and-interface system rather than a single
+    CSS value.
 
 The signals are useful because computed styles, geometry, visible text, links,
 resources, and animation metadata can be normalized from a rendered page. No ML,
 source-code ownership guess, or raw DOM transfer is required.
 
-## Confidence scoring
+## Anchored constellation scoring
 
 Visual and structural signals use bounded confidence curves rather than relying on
 single-number cutoffs. Counts, proportions, geometry, and presentation features
@@ -88,7 +105,33 @@ must still appear near the opening heading, but its radius and aspect ratio are
 graded instead of requiring one exact capsule geometry.
 
 Candidate ratios use semantically relevant populations such as probable UI surfaces
-rather than every large DOM element. Combination, breadth, and density bonuses are
-also confidence-weighted so a one-element difference does not cause a large score
-jump. The curve endpoints remain heuristic calibration values and should be tuned
-against a mixed corpus of positive examples and visually distinct negative controls.
+rather than every large DOM element. Higher-order archetypes use a defining anchor
+and a set of supporting evidence groups. Each group can accept multiple related
+signals, allowing the detector to recognize variations of a composition without
+turning every isolated convention into a positive result. A minimum number of
+independent groups must be active before the constellation contributes points.
+
+The constellation confidence combines anchor strength, weighted group coverage,
+and evidence breadth. Combination points are capped relative to the base detector
+score, while evidence-family diminishing returns reduce duplicate descriptions of
+the same underlying choice. Independent evidence families determine a small breadth
+bonus and the maximum reachable score. This prevents one highly decorated visual
+motif from reaching a severe rating by itself.
+
+The curve endpoints, group membership, and weights remain heuristic calibration
+values. They should be tuned against a mixed corpus of positive examples and
+visually distinct negative controls, with known handcrafted portfolios retained as
+regression cases.
+
+## Render readiness
+
+Detector quality depends on observing the completed client-rendered page rather than
+an initial loading screen. After DOM content loads, the scanner polls a compact page
+snapshot containing visible headings, links, buttons, images, sections, text length,
+and document height. Extraction begins after meaningful content is present across
+consecutive stable samples and no viewport-blocking loader remains visible.
+
+Loader recognition considers loading text, progress semantics, common loader and
+splash markers, positioning, and viewport coverage. The loop exits early for stable
+ordinary pages and has a fixed upper bound so a broken animation or permanent
+loading state cannot consume the full scan indefinitely.

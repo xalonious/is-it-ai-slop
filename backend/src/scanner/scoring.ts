@@ -1,5 +1,5 @@
 import type { Finding, SlopCategory } from './types';
-import { clamp01, createMeasuredFinding } from './detectors/helpers';
+import { detectCombinations } from './detectors/combinationDetectors';
 
 const CATEGORY_CAPS: Record<SlopCategory, number> = {
   layout: 32,
@@ -30,6 +30,7 @@ const EVIDENCE_FAMILY: Record<string, EvidenceFamily> = {
   'giant-greeting': 'hero-composition',
   'gradient-heading': 'hero-composition',
   'hero-social-cluster': 'hero-composition',
+  'circular-profile-hero': 'hero-composition',
   'editorial-statement-hero': 'hero-composition',
   'rounded-everything': 'surface-system',
   'pill-infestation': 'surface-system',
@@ -43,10 +44,12 @@ const EVIDENCE_FAMILY: Record<string, EvidenceFamily> = {
   'neon-shadow-overload': 'visual-atmosphere',
   'decorative-particle-field': 'visual-atmosphere',
   'matrix-code-rain': 'visual-atmosphere',
+  'hero-canvas-atmosphere': 'visual-atmosphere',
   'fade-up-monoculture': 'motion-language',
   'motion-library': 'motion-language',
   'credential-marquee': 'motion-language',
   'dot-ring-cursor': 'motion-language',
+  'typewriter-role-carousel': 'motion-language',
   'monospace-command-ui': 'code-interface',
   'portfolio-telemetry-cosplay': 'code-interface',
   'faux-terminal': 'code-interface',
@@ -55,6 +58,7 @@ const EVIDENCE_FAMILY: Record<string, EvidenceFamily> = {
   'cyber-neon-hero': 'code-interface',
   'developer-identity-console-hero': 'composition-convergence',
   'cyber-code-editor-hero': 'composition-convergence',
+  'animated-profile-hero': 'composition-convergence',
   'copy-cliches': 'copy-patterns',
   'generic-section-sequence': 'copy-patterns',
   'navbar-cliche': 'navigation-patterns',
@@ -132,131 +136,6 @@ export const SEVERITY_BANDS = [
   { minimum: 0, label: 'Suspiciously Original' },
 ] as const;
 
-const DETECTOR_MAX_POINTS: Record<string, number> = {
-  'hero-pill': 4,
-  'paired-hero-ctas': 4,
-  'split-hero': 3,
-  'giant-greeting': 1,
-  'gradient-heading': 6,
-  'hero-social-cluster': 1,
-  'rounded-everything': 8,
-  'pill-infestation': 6,
-  glassmorphism: 10,
-  'bento-grid': 9,
-  'lucide-saturation': 1,
-  'fade-up-monoculture': 8,
-  'indigo-violet-wash': 4,
-  'decorative-radial-blooms': 3,
-  'neon-shadow-overload': 4,
-  'hard-edge-brutalism': 7,
-  'monospace-command-ui': 4,
-  'portfolio-telemetry-cosplay': 4,
-  'copy-cliches': 11,
-  'generic-section-sequence': 2,
-  'navbar-cliche': 2,
-  'project-card-matrix': 3,
-  'excessive-project-badges': 4,
-  'credential-marquee': 3,
-  'dot-ring-cursor': 4,
-  'editorial-statement-hero': 2,
-  'numbered-micro-nav': 2,
-  'technical-grid-background': 3,
-  'tech-stack-soup': 2,
-  'faux-terminal': 9,
-  'faux-code-editor': 6,
-  'developer-profile-object': 5,
-  'cyber-neon-hero': 5,
-  'decorative-particle-field': 3,
-  'matrix-code-rain': 3,
-};
-
-const comboFindings = (findings: Finding[]): Finding[] => {
-  const ids = new Set(findings.map((finding) => finding.detectorId));
-  const combos: Finding[] = [];
-  const strength = (id: string): number => {
-    const finding = findings.find((candidate) => candidate.detectorId === id);
-    return finding
-      ? clamp01(finding.points / (DETECTOR_MAX_POINTS[id] ?? Math.max(1, finding.points)))
-      : 0;
-  };
-  const confidence = (members: string[], fullEvidenceCount: number): number =>
-    clamp01(members.reduce((total, id) => total + strength(id), 0) / fullEvidenceCount);
-  const matches = (members: string[], minimumStrength = 0.3): string[] =>
-    members.filter((id) => strength(id) >= minimumStrength);
-
-  const heroIds = ['hero-pill', 'paired-hero-ctas', 'split-hero', 'giant-greeting', 'gradient-heading', 'hero-social-cluster'];
-  const heroMatches = matches(heroIds);
-  const primaryHeroMatches = matches(['paired-hero-ctas', 'split-hero', 'giant-greeting', 'gradient-heading']);
-  if (heroMatches.length >= 3 && primaryHeroMatches.length >= 1) {
-    combos.push(...createMeasuredFinding('combo-classic-hero', 'template', 'Classic vibe-coded hero constellation', 'Several individually ordinary hero choices align into a suspiciously familiar full composition.', {
-      confidence: confidence(heroIds, 4), maximumPoints: 14, minimumConfidence: 0.5, evidence: heroMatches,
-    }));
-  }
-
-  const visualIds = ['rounded-everything', 'pill-infestation', 'glassmorphism', 'bento-grid', 'lucide-saturation', 'fade-up-monoculture', 'indigo-violet-wash', 'decorative-radial-blooms', 'neon-shadow-overload'];
-  const visualMatches = matches(visualIds);
-  const primaryVisualMatches = matches(['rounded-everything', 'glassmorphism', 'bento-grid']);
-  if (visualMatches.length >= 4 && primaryVisualMatches.length >= 2) {
-    combos.push(...createMeasuredFinding('combo-component-defaults', 'template', 'Component-default convergence', 'Rounded surfaces, fashionable effects, icons, and motion recur as one recognizable design-system cluster.', {
-      confidence: confidence(visualIds, 4), maximumPoints: 15, minimumConfidence: 0.5, evidence: visualMatches,
-    }));
-  }
-
-  const commandCenterIds = ['hard-edge-brutalism', 'monospace-command-ui', 'portfolio-telemetry-cosplay'];
-  const commandCenterMatches = commandCenterIds.filter((id) => ids.has(id));
-  if (commandCenterMatches.length === commandCenterIds.length) {
-    combos.push(...createMeasuredFinding('combo-developer-control-panel', 'template', 'Neo-brutalist developer command center', 'Hard-edged component geometry, command-line typography, and decorative telemetry converge on a recognizable generator-era portfolio composition.', {
-      confidence: confidence(commandCenterIds, 3), maximumPoints: 8, minimumConfidence: 0.4, evidence: commandCenterMatches,
-    }));
-  }
-
-  const portfolioIds = ['copy-cliches', 'generic-section-sequence', 'navbar-cliche'];
-  if (portfolioIds.every((id) => ids.has(id))) {
-    combos.push(...createMeasuredFinding('combo-portfolio-template', 'copy', 'Portfolio template energy spike', 'Copy, navigation, and section ordering all follow the same familiar portfolio script.', {
-      confidence: confidence(portfolioIds, 3), maximumPoints: 8, minimumConfidence: 0.4,
-      evidence: ['copy clichés', 'canonical navigation', 'canonical section order'],
-    }));
-  }
-
-  const projectMatrixCompanions = ['bento-grid', 'copy-cliches', 'excessive-project-badges', 'fade-up-monoculture', 'gradient-heading', 'paired-hero-ctas'];
-  const projectMatrixMatches = matches(projectMatrixCompanions);
-  const hasProjectStructure = strength('bento-grid') >= 0.3 || strength('excessive-project-badges') >= 0.3;
-  if (strength('project-card-matrix') >= 0.3 && hasProjectStructure && projectMatrixMatches.length >= 2) {
-    combos.push(...createMeasuredFinding('combo-project-matrix', 'template', 'Portfolio-card template convergence', 'A uniform project matrix appears alongside multiple familiar generator-era presentation patterns.', {
-      confidence: clamp01((strength('project-card-matrix') + confidence(projectMatrixCompanions, 2)) / 2),
-      maximumPoints: 4, minimumConfidence: 0.45, evidence: ['project-card-matrix', ...projectMatrixMatches],
-    }));
-  }
-
-  const editorialIds = ['credential-marquee', 'dot-ring-cursor', 'editorial-statement-hero', 'numbered-micro-nav', 'fade-up-monoculture'];
-  const editorialMatches = matches(editorialIds);
-  if (editorialMatches.length >= 4 && ids.has('credential-marquee') && ids.has('dot-ring-cursor')) {
-    combos.push(...createMeasuredFinding('combo-editorial-portfolio', 'template', 'Editorial portfolio starter pack', 'An oversized statement hero, indexed micro-navigation, looping credentials, custom cursor, and reveal motion converge on a familiar generator-era portfolio composition.', {
-      confidence: confidence(editorialIds, 4), maximumPoints: 8, minimumConfidence: 0.45, evidence: editorialMatches,
-    }));
-  }
-
-  const gridBackdropCompanions = ['fade-up-monoculture', 'glassmorphism', 'hero-pill', 'lucide-saturation', 'pill-infestation', 'tech-stack-soup'];
-  const gridBackdropMatches = matches(gridBackdropCompanions);
-  if (strength('technical-grid-background') >= 0.5 && gridBackdropMatches.length >= 3) {
-    combos.push(...createMeasuredFinding('combo-technical-canvas', 'template', 'Technical-canvas template convergence', 'A graph-paper backdrop appears alongside several familiar component-library and motion defaults.', {
-      confidence: clamp01((strength('technical-grid-background') + confidence(gridBackdropCompanions, 3)) / 2),
-      maximumPoints: 6, minimumConfidence: 0.45, evidence: ['technical-grid-background', ...gridBackdropMatches],
-    }));
-  }
-
-  const cyberIds = ['faux-terminal', 'faux-code-editor', 'developer-profile-object', 'cyber-neon-hero', 'decorative-particle-field', 'matrix-code-rain', 'paired-hero-ctas', 'fade-up-monoculture'];
-  const cyberMatches = matches(cyberIds);
-  const hasCodeInterface = ids.has('faux-terminal') || ids.has('faux-code-editor') || ids.has('developer-profile-object');
-  const hasSpatialCyberComposition = ids.has('developer-identity-console-hero') || ids.has('cyber-code-editor-hero');
-  if (!hasSpatialCyberComposition && cyberMatches.length >= 4 && hasCodeInterface && ids.has('cyber-neon-hero')) {
-    combos.push(...createMeasuredFinding('combo-developer-command-center', 'template', 'Developer command-center convergence', 'Terminal cosplay, neon presentation, decorative atmosphere, and familiar hero behavior combine into a recognizable cyber-portfolio template.', {
-      confidence: confidence(cyberIds, 4), maximumPoints: 10, minimumConfidence: 0.45, evidence: cyberMatches,
-    }));
-  }
-  return combos;
-};
-
 const capCombinationPoints = (combinations: Finding[], basePoints: number): Finding[] => {
   const requested = combinations.reduce((total, finding) => total + finding.points, 0);
   const cap = Math.min(requested, Math.max(0, Math.ceil(basePoints * 0.2)));
@@ -288,7 +167,7 @@ export interface ScoreResult {
 export const calculateScore = (baseFindings: Finding[]): ScoreResult => {
   const scoredBaseFindings = applyFamilyDiminishingReturns(baseFindings);
   const basePoints = scoredBaseFindings.reduce((total, finding) => total + finding.points, 0);
-  const combinations = capCombinationPoints(comboFindings(baseFindings), basePoints);
+  const combinations = capCombinationPoints(detectCombinations(baseFindings), basePoints);
   const findings = [...scoredBaseFindings, ...combinations].sort((a, b) => b.points - a.points);
   const raw = Object.fromEntries(Object.keys(CATEGORY_CAPS).map((category) => [category, 0])) as Record<SlopCategory, number>;
   for (const finding of findings) raw[finding.category] += Math.max(0, finding.points);

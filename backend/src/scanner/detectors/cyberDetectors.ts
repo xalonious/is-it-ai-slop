@@ -1,5 +1,6 @@
 import type { AnalysisContext, Detector, ElementSnapshot } from '../types';
-import { clamp01, createFinding, createMeasuredFinding, isPill, mainHeading, ramp, weightedConfidence } from './helpers';
+import { evaluateConstellation } from './constellations';
+import { createFinding, createMeasuredFinding, isPill, mainHeading, ramp, weightedConfidence } from './helpers';
 
 const elementMarkers = (classes: string[]): string => classes.join(' ').toLowerCase();
 
@@ -204,9 +205,6 @@ const developerProfileCandidates = (context: AnalysisContext): DeveloperProfileC
     .sort((left, right) => left.element.rect.width * left.element.rect.height - right.element.rect.width * right.element.rect.height)
     .map(({ element, fields }) => ({ element, fields }));
 
-const geometricMean = (values: number[]): number =>
-  values.length ? Math.pow(values.reduce((product, value) => product * clamp01(value), 1), 1 / values.length) : 0;
-
 export const cyberDetectors: Detector[] = [
   {
     id: 'faux-terminal',
@@ -301,16 +299,13 @@ export const cyberDetectors: Detector[] = [
           heading.rect.y - element.rect.y <= 190,
         )
         .sort((left, right) => Math.abs(heading.rect.y - left.rect.y) - Math.abs(heading.rect.y - right.rect.y))[0];
-      if (!availability) return [];
-
       const profile = developerProfileCandidates(context).find(({ element }) => {
         const panelCenterX = element.rect.x + element.rect.width / 2;
         const headingCenterX = heading.rect.x + heading.rect.width / 2;
-        const verticallyRelated = element.rect.y <= heading.rect.y + heading.rect.height + 520 &&
-          element.rect.y + element.rect.height >= availability.rect.y - 20;
         return panelCenterX > headingCenterX &&
           element.rect.x >= context.viewport.width * 0.43 &&
-          verticallyRelated;
+          element.rect.y <= heading.rect.y + heading.rect.height + 520 &&
+          element.rect.y + element.rect.height >= heading.rect.y - 220;
       });
       if (!profile) return [];
 
@@ -332,66 +327,53 @@ export const cyberDetectors: Detector[] = [
         element.rect.y <= heroBottom &&
         Math.abs(element.rect.y - heading.rect.y) <= 520 &&
         HERO_CTA.test(element.text),
-      ).length >= 2;
+      ).length;
       const codeBrand = heroElements.some((element) =>
         element.text.length > 2 && element.text.length < 70 &&
         /<\/?[a-z][^>]*>|<[^>]+\/>/i.test(element.text) &&
         MONOSPACE_FONT.test(element.fontFamily),
       );
-      const trustBadges = [
+      const trustBadgeCount = [
         /git(?:hub)?\s+native/i,
         /cloudflare\s+deployed/i,
         /ssl\s+certified/i,
         /(?:production|live)\s+(?:ready|deployed)/i,
-      ].filter((pattern) => pattern.test(context.visibleText)).length >= 2;
-      const supporters = [
-        darkCanvas ? 'dark hero canvas' : undefined,
-        saturatedAccents >= 4 ? `${saturatedAccents} saturated blue/neon accents` : undefined,
-        pairedCtas ? 'paired portfolio calls-to-action' : undefined,
-        codeBrand ? 'code-styled identity mark' : undefined,
-        trustBadges ? 'deployment or security badge strip' : undefined,
-      ].filter((value): value is string => Boolean(value));
-      if (supporters.length < 2) return [];
-
-      const horizontalSeparation = ramp(
-        profile.element.rect.x - (heading.rect.x + heading.rect.width),
-        -80,
-        180,
-      );
-      const verticalAlignment = 1 - ramp(
-        Math.abs(profile.element.rect.y - heading.rect.y),
-        80,
-        430,
-      );
-      const geometryConfidence = Math.max(0.5, weightedConfidence([
-        { confidence: horizontalSeparation, weight: 0.6 },
-        { confidence: verticalAlignment, weight: 0.4 },
-      ]));
-      const coreConfidence = geometricMean([
-        ramp(profile.fields.length, 2, 6),
-        geometryConfidence,
-        1,
+      ].filter((pattern) => pattern.test(context.visibleText)).length;
+      const geometryConfidence = weightedConfidence([
+        { confidence: ramp(profile.element.rect.x - (heading.rect.x + heading.rect.width), -80, 180), weight: 0.6 },
+        { confidence: 1 - ramp(Math.abs(profile.element.rect.y - heading.rect.y), 80, 430), weight: 0.4 },
       ]);
-      const confidence = weightedConfidence([
-        { confidence: coreConfidence, weight: 0.8 },
-        { confidence: ramp(supporters.length, 1, 5), weight: 0.2 },
-      ]);
+      const match = evaluateConstellation([
+        { id: 'profile-layout', confidence: geometryConfidence, evidence: `${profile.element.rect.width}x${profile.element.rect.height}px code-profile panel beside the heading` },
+        { id: 'profile-fields', confidence: ramp(profile.fields.length, 2, 6), evidence: `${profile.fields.length} profile fields: ${profile.fields.join(', ')}` },
+        { id: 'availability', confidence: availability ? 1 : 0, evidence: availability ? `Availability pill: ${availability.text.slice(0, 90)}` : undefined },
+        { id: 'dark-canvas', confidence: darkCanvas ? 1 : 0, evidence: 'dark hero canvas' },
+        { id: 'neon-accents', confidence: ramp(saturatedAccents, 2, 9), evidence: `${saturatedAccents} saturated blue or neon accents` },
+        { id: 'paired-ctas', confidence: ramp(pairedCtas, 1, 2.5), evidence: `${pairedCtas} portfolio calls-to-action` },
+        { id: 'trust-badges', confidence: ramp(trustBadgeCount, 0, 3), evidence: `${trustBadgeCount} deployment or security badges` },
+        { id: 'code-brand', confidence: codeBrand ? 1 : 0, evidence: 'code-styled identity mark' },
+      ], {
+        anchors: ['profile-layout', 'profile-fields'],
+        minimumGroups: 3,
+        groups: [
+          { id: 'developer object', alternatives: ['profile-layout', 'profile-fields'] },
+          { id: 'availability cue', alternatives: ['availability'] },
+          { id: 'technical styling', alternatives: ['dark-canvas', 'neon-accents'] },
+          { id: 'conversion and trust', alternatives: ['paired-ctas', 'trust-badges'] },
+          { id: 'coded branding', alternatives: ['code-brand'] },
+        ],
+      });
 
       return createMeasuredFinding(
         this.id,
         this.category,
         'Developer identity console hero',
-        'An availability badge, personal code object, and dark split-screen developer pitch form a tightly coupled generator-era hero composition.',
+        'A personal code object anchors a split-screen developer pitch with several familiar availability, technical, and conversion cues.',
         {
-          confidence,
+          confidence: match.confidence,
           maximumPoints: 12,
-          minimumConfidence: 0.55,
-          evidence: [
-            `Availability pill: ${availability.text.slice(0, 90)}`,
-            `${profile.element.rect.width}x${profile.element.rect.height}px code-profile panel beside the heading`,
-            `${profile.fields.length} profile fields: ${profile.fields.join(', ')}`,
-            ...supporters,
-          ],
+          minimumConfidence: 0.4,
+          evidence: match.evidence,
         },
       );
     },
@@ -414,15 +396,13 @@ export const cyberDetectors: Detector[] = [
           heading.rect.y - element.rect.y <= 200,
         )
         .sort((left, right) => Math.abs(heading.rect.y - left.rect.y) - Math.abs(heading.rect.y - right.rect.y))[0];
-      if (!statusBadge) return [];
-
       const editor = codeEditorCandidates(context).find(({ element }) => {
         const editorCenterX = element.rect.x + element.rect.width / 2;
         const headingCenterX = heading.rect.x + heading.rect.width / 2;
         return editorCenterX > headingCenterX &&
           element.rect.x >= context.viewport.width * 0.43 &&
           element.rect.y <= heading.rect.y + heading.rect.height + 500 &&
-          element.rect.y + element.rect.height >= statusBadge.rect.y - 20;
+          element.rect.y + element.rect.height >= heading.rect.y - 220;
       });
       if (!editor) return [];
 
@@ -439,10 +419,7 @@ export const cyberDetectors: Detector[] = [
       const saturatedAccents = heroElements.filter((element) =>
         hasSaturatedComputedColor(`${element.backgroundColor} ${element.backgroundImage} ${element.boxShadow} ${element.textShadow}`),
       ).length;
-      const technicalTheme = darkCanvas && saturatedAccents >= 4 &&
-        heroElements.filter((element) => MONOSPACE_FONT.test(element.fontFamily)).length >= 3;
-      if (!technicalTheme) return [];
-
+      const monospaceElements = heroElements.filter((element) => MONOSPACE_FONT.test(element.fontFamily)).length;
       const markers = context.documentMarkers.toLowerCase();
       const matrixRain = /matrix(?:[-_ ]?(?:canvas|rain|code))|digital[-_ ]?rain|code[-_ ]?rain/.test(markers);
       const technicalGrid = heroElements.some((element) => {
@@ -452,75 +429,65 @@ export const cyberDetectors: Detector[] = [
           element.rect.height >= context.viewport.height * 0.45;
       });
       const controls = [...context.links, ...context.buttons.filter((button) => button.tag === 'button')];
-      const commandNavigation = controls.filter((element) => {
+      const commandNavigationCount = controls.filter((element) => {
         const text = element.text.trim();
         return element.rect.y < 260 && text.length > 1 && text.length <= 32 &&
           MONOSPACE_FONT.test(element.fontFamily) &&
           (/^_?[A-Z0-9()[\]{}<>./:+-]+$/.test(text) || /^_[a-z0-9-]+$/i.test(text));
-      }).length >= 3;
+      }).length;
       const pairedCtas = controls.filter((element) =>
         element.rect.y <= heroBottom &&
         Math.abs(element.rect.y - heading.rect.y) <= 520 &&
         HERO_CTA.test(element.text),
-      ).length >= 2;
+      ).length;
       const codeBrand = heroElements.some((element) =>
         element.text.length > 2 && element.text.length < 70 &&
         /<\/?[a-z][^>]*>|<[^>]+\/>/i.test(element.text) &&
         MONOSPACE_FONT.test(element.fontFamily),
       );
-      const repeatedMotion = context.animations.length >= 5 ||
-        heroElements.filter((element) => element.animationName && element.animationName !== 'none').length >= 8;
-      const supporters = [
-        matrixRain ? 'matrix-style code-rain canvas' : undefined,
-        technicalGrid ? 'full-hero technical grid' : undefined,
-        commandNavigation ? 'command-styled navigation' : undefined,
-        pairedCtas ? 'paired portfolio calls-to-action' : undefined,
-        codeBrand ? 'code-styled identity mark' : undefined,
-        repeatedMotion ? 'repeated hero motion treatment' : undefined,
-        `${saturatedAccents} saturated blue/neon accents`,
-      ].filter((value): value is string => Boolean(value));
-      if (supporters.length < 3) return [];
-
-      const horizontalSeparation = ramp(
-        editor.element.rect.x - (heading.rect.x + heading.rect.width),
-        -80,
-        180,
-      );
-      const verticalAlignment = 1 - ramp(
-        Math.abs(editor.element.rect.y - heading.rect.y),
-        80,
-        430,
-      );
-      const geometryConfidence = Math.max(0.5, weightedConfidence([
-        { confidence: horizontalSeparation, weight: 0.6 },
-        { confidence: verticalAlignment, weight: 0.4 },
-      ]));
-      const coreConfidence = geometricMean([
-        ramp(editor.score, 4, 11),
-        geometryConfidence,
-        ramp(saturatedAccents, 3, 10),
-        1,
+      const repeatedMotionCount = context.animations.length +
+        heroElements.filter((element) => element.animationName && element.animationName !== 'none').length;
+      const geometryConfidence = weightedConfidence([
+        { confidence: ramp(editor.element.rect.x - (heading.rect.x + heading.rect.width), -80, 180), weight: 0.6 },
+        { confidence: 1 - ramp(Math.abs(editor.element.rect.y - heading.rect.y), 80, 430), weight: 0.4 },
       ]);
-      const confidence = weightedConfidence([
-        { confidence: coreConfidence, weight: 0.8 },
-        { confidence: ramp(supporters.length, 2, 7), weight: 0.2 },
-      ]);
+      const match = evaluateConstellation([
+        { id: 'editor-layout', confidence: geometryConfidence, evidence: `${editor.element.rect.width}x${editor.element.rect.height}px code editor beside the heading` },
+        { id: 'editor-detail', confidence: ramp(editor.score, 4, 11), evidence: editor.signals.slice(0, 4).join(', ') },
+        { id: 'status-badge', confidence: statusBadge ? 1 : 0, evidence: statusBadge ? `System-status badge: ${statusBadge.text.slice(0, 90)}` : undefined },
+        { id: 'dark-canvas', confidence: darkCanvas ? 1 : 0, evidence: 'dark hero canvas' },
+        { id: 'neon-accents', confidence: ramp(saturatedAccents, 2, 10), evidence: `${saturatedAccents} saturated blue or neon accents` },
+        { id: 'monospace-system', confidence: ramp(monospaceElements, 1, 7), evidence: `${monospaceElements} monospace interface elements` },
+        { id: 'matrix-rain', confidence: matrixRain ? 1 : 0, evidence: 'matrix-style code-rain canvas' },
+        { id: 'technical-grid', confidence: technicalGrid ? 1 : 0, evidence: 'full-hero technical grid' },
+        { id: 'command-navigation', confidence: ramp(commandNavigationCount, 1, 4), evidence: `${commandNavigationCount} command-styled navigation controls` },
+        { id: 'paired-ctas', confidence: ramp(pairedCtas, 1, 2.5), evidence: `${pairedCtas} portfolio calls-to-action` },
+        { id: 'code-brand', confidence: codeBrand ? 1 : 0, evidence: 'code-styled identity mark' },
+        { id: 'repeated-motion', confidence: ramp(repeatedMotionCount, 3, 12), evidence: `${repeatedMotionCount} animated hero treatments` },
+      ], {
+        anchors: ['editor-layout', 'editor-detail'],
+        minimumGroups: 3,
+        groups: [
+          { id: 'code editor', alternatives: ['editor-layout', 'editor-detail'] },
+          { id: 'system status', alternatives: ['status-badge'] },
+          { id: 'technical styling', alternatives: ['dark-canvas', 'neon-accents', 'monospace-system'] },
+          { id: 'technical atmosphere', alternatives: ['matrix-rain', 'technical-grid'] },
+          { id: 'command interface', alternatives: ['command-navigation', 'code-brand'] },
+          { id: 'conversion row', alternatives: ['paired-ctas'] },
+          { id: 'scripted motion', alternatives: ['repeated-motion'] },
+        ],
+      });
 
       return createMeasuredFinding(
         this.id,
         this.category,
         'Cyber code-editor hero constellation',
-        'A system-status badge, adjacent source editor, command interface, and animated technical canvas converge into a generator-era cyber portfolio hero.',
+        'An adjacent source editor anchors a developer hero with several familiar status, command-interface, and technical-atmosphere cues.',
         {
-          confidence,
+          confidence: match.confidence,
           maximumPoints: 12,
-          minimumConfidence: 0.55,
-          evidence: [
-            `System-status badge: ${statusBadge.text.slice(0, 90)}`,
-            `${editor.element.rect.width}x${editor.element.rect.height}px code editor beside the heading`,
-            ...editor.signals.slice(0, 4),
-            ...supporters,
-          ],
+          minimumConfidence: 0.4,
+          evidence: match.evidence,
         },
       );
     },
@@ -556,8 +523,6 @@ export const cyberDetectors: Detector[] = [
       const neonPresentation = glowElements.length > 0 || explicitlyNeonElements.length > 0 || saturatedHeroElements.length >= 4;
       const technicalPresentation = technicalTypography || codeInterfaceElements > 0;
 
-      // These are defining features, not interchangeable points. A large heading alone
-      // must never turn an otherwise ordinary portfolio into a cyber-neon finding.
       if (!darkHeroSurfaces.length || !neonPresentation || !technicalPresentation) return [];
 
       const neonStrength = Math.max(

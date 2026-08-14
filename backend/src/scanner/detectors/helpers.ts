@@ -78,10 +78,34 @@ export const probableSurface = (element: ElementSnapshot): boolean =>
     /^(?:a|button|article|section)$/.test(element.tag)
   );
 
-export const mainHeading = (context: AnalysisContext): ElementSnapshot | undefined =>
-  context.headings
-    .filter((heading) => heading.tag === 'h1' && inHero(heading))
-    .sort((a, b) => b.fontSize - a.fontSize)[0];
+export const mainHeading = (context: AnalysisContext): ElementSnapshot | undefined => {
+  const semanticHeadings = context.headings
+    .filter((heading) => inHero(heading) && heading.text.length >= 3 && heading.text.length <= 160)
+    .sort((a, b) =>
+      Number(b.tag === 'h1') - Number(a.tag === 'h1') ||
+      b.fontSize - a.fontSize ||
+      a.rect.y - b.rect.y,
+    );
+  if (semanticHeadings[0]) return semanticHeadings[0];
+
+  return context.elements
+    .filter((element) =>
+      /^(?:div|p|span)$/.test(element.tag) &&
+      element.rect.y >= 80 && element.rect.y < 700 &&
+      element.rect.width >= 160 && element.rect.width <= context.viewport.width * 0.82 &&
+      element.rect.height >= 36 && element.rect.height <= 260 &&
+      element.fontSize >= 32 && element.fontWeight >= 600 &&
+      element.text.length >= 4 && element.text.length <= 120 &&
+      !element.ariaBusy &&
+      !/^(?:navigation|banner)$/.test(element.role ?? ''),
+    )
+    .sort((a, b) =>
+      b.fontSize - a.fontSize ||
+      b.fontWeight - a.fontWeight ||
+      a.rect.y - b.rect.y ||
+      a.rect.width * a.rect.height - b.rect.width * b.rect.height,
+    )[0];
+};
 
 export const near = (a: ElementSnapshot, b: ElementSnapshot, vertical = 240): boolean =>
   Math.abs(a.rect.y - b.rect.y) <= vertical;

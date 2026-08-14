@@ -4,6 +4,8 @@ import type { AnalysisContext, FrameworkFingerprints, PortfolioScan } from './ty
 
 const VIEWPORT = { width: 1440, height: 1000 };
 const NAVIGATION_TIMEOUT_MS = 15_000;
+const READINESS_TIMEOUT_MS = 8_000;
+const READINESS_POLL_MS = 250;
 const SKIPPED_CRAWL_PATH = /\.(?:avif|css|csv|docx?|gif|ico|jpe?g|json|mp3|mp4|pdf|png|rss|svg|txt|webm|webp|xml|zip)$/i;
 const SKIPPED_ROUTE = /^\/(?:api|admin|auth|login|logout|sign-?in|sign-?out|download|feed|rss)(?:\/|$)/i;
 
@@ -61,8 +63,12 @@ const extractContext = async (
     const clean = (value: string | null | undefined, max = 240) =>
       (value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
     const number = (value: string) => Number.parseFloat(value) || 0;
-    const radius = (value: string) =>
-      Math.max(...value.split(/[ /]+/).map(number).filter(Number.isFinite), 0);
+    const radius = (value: string, width: number, height: number) =>
+      Math.max(...value.split(/[ /]+/).map((part) =>
+        part.endsWith('%')
+          ? number(part) / 100 * Math.min(width, height)
+          : number(part),
+      ).filter(Number.isFinite), 0);
     const visible = (element: Element) => {
       const style = getComputedStyle(element);
       const rect = element.getBoundingClientRect();
@@ -106,7 +112,7 @@ const extractContext = async (
         fontWeight: Number.parseInt(style.fontWeight, 10) || 400,
         fontFamily: clean(style.fontFamily, 300),
         whiteSpace: style.whiteSpace,
-        borderRadius: radius(style.borderRadius),
+        borderRadius: radius(style.borderRadius, rect.width, rect.height),
         borderTopWidth: number(style.borderTopWidth),
         borderTopStyle: style.borderTopStyle,
         borderTopColor: clean(style.borderTopColor),
@@ -301,6 +307,85 @@ const discoverCrawlCandidates = (
   return candidates.sort((a, b) => a.priority - b.priority || a.url.localeCompare(b.url));
 };
 
+interface PageReadinessSnapshot {
+  blockingLoader: boolean;
+  fingerprint: string;
+  meaningfulContent: boolean;
+}
+
+const pageReadinessSnapshot = async (page: Page): Promise<PageReadinessSnapshot> =>
+  page.evaluate(() => {
+    const visible = (element: Element): boolean => {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      return style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        Number.parseFloat(style.opacity || '1') > 0.02 &&
+        rect.width > 4 &&
+        rect.height > 4 &&
+        rect.bottom > 0 &&
+        rect.right > 0 &&
+        rect.top < innerHeight &&
+        rect.left < innerWidth;
+    };
+    const elements = Array.from(document.body?.querySelectorAll('*') ?? []).filter(visible);
+    const text = (document.body?.innerText ?? '').replace(/\s+/g, ' ').trim();
+    const headings = elements.filter((element) => /^H[1-3]$/.test(element.tagName)).length;
+    const links = elements.filter((element) => element.tagName === 'A').length;
+    const buttons = elements.filter((element) => element.tagName === 'BUTTON' || element.getAttribute('role') === 'button').length;
+    const images = elements.filter((element) => element.tagName === 'IMG' || element.tagName === 'PICTURE').length;
+    const sections = elements.filter((element) => element.tagName === 'MAIN' || element.tagName === 'SECTION').length;
+    const loaderText = /^(?:loading|please wait|initializing|connecting|fetching|preparing|booting|starting)(?:[\s.!…:_-].*)?$/i;
+    const loaderMarker = /(?:^|[\s_-])(?:app-?loader|loading(?:-?screen)?|loader|preloader|progress|skeleton|spinner|splash)(?:$|[\s_-])/i;
+    const blockingLoader = elements.some((element) => {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      const marker = `${element.id} ${element.className} ${element.getAttribute('role') ?? ''} ${element.getAttribute('aria-label') ?? ''}`;
+      const elementText = (element.textContent ?? '').replace(/\s+/g, ' ').trim();
+      const status = element.getAttribute('aria-busy') === 'true' ||
+        element.getAttribute('role') === 'progressbar' ||
+        loaderMarker.test(marker) ||
+        loaderText.test(elementText);
+      if (!status) return false;
+      const viewportCoverage = rect.width * rect.height / Math.max(1, innerWidth * innerHeight);
+      const overlayPosition = style.position === 'fixed' || style.position === 'absolute';
+      return viewportCoverage >= 0.25 ||
+        (overlayPosition && rect.width >= innerWidth * 0.5 && rect.height >= innerHeight * 0.35) ||
+        (text.length <= 160 && loaderText.test(elementText));
+    });
+    const meaningfulContent = text.length >= 100 &&
+      headings >= 1 &&
+      sections >= 1 &&
+      links + buttons + images >= 1;
+    const fingerprint = [
+      headings,
+      links,
+      buttons,
+      images,
+      sections,
+      Math.round(text.length / 40),
+      Math.round((document.documentElement.scrollHeight || document.body?.scrollHeight || 0) / 40),
+    ].join(':');
+    return { blockingLoader, fingerprint, meaningfulContent };
+  });
+
+const waitForPageReadiness = async (page: Page): Promise<void> => {
+  const startedAt = Date.now();
+  let previousFingerprint = '';
+  let stableSamples = 0;
+
+  while (Date.now() - startedAt < READINESS_TIMEOUT_MS) {
+    const snapshot = await pageReadinessSnapshot(page);
+    stableSamples = snapshot.fingerprint === previousFingerprint ? stableSamples + 1 : 1;
+    previousFingerprint = snapshot.fingerprint;
+    const elapsed = Date.now() - startedAt;
+
+    if (!snapshot.blockingLoader && snapshot.meaningfulContent && stableSamples >= 2) return;
+    if (!snapshot.blockingLoader && elapsed >= 1_000 && stableSamples >= 3) return;
+    await page.waitForTimeout(READINESS_POLL_MS);
+  }
+};
+
 export const scanPortfolio = async (
   url: URL,
   guard: UrlGuard,
@@ -362,7 +447,7 @@ export const scanPortfolio = async (
       if (expectedOrigin && new URL(page.url()).origin !== expectedOrigin) {
         throw new Error('A discovered page redirected away from the scanned site.');
       }
-      await page.waitForTimeout(500);
+      await waitForPageReadiness(page);
       return extractContext(page, targetUrl, isEntryPage);
     };
 
